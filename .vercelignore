@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.git/
+.vercel/
+.venv/
+.vscode/
+
+.env
+.env.*
+backend/.env
+backend/.env.*
+backend/daymark.db
+backend/__pycache__/
+backend/.pytest_cache/
+*.pyc
