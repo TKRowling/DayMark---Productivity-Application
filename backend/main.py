@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import Base, engine, get_db
 from migrations import run_schema_migrations
-from models import Meal, Mission, Requirement, Scholarship, Task, WeightEntry, Workout
+from models import Meal, Mission, ScholarshipEntry, ScholarshipRequirement, Task, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema
 
 
@@ -30,7 +30,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Daymark API",
     description="Persistence API for missions, tasks, scholarships, weight tracking, workouts, and meals.",
-    version="1.1.0",
+    version="1.2.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -63,6 +63,21 @@ def new_id() -> str:
 
 def seed_dashboard() -> DashboardSchema:
     today = date.today()
+    default_scholarship = {
+        "id": new_id(),
+        "name": "Global Future Leaders Scholarship",
+        "provider": "Bright Horizons Foundation",
+        "amount": "$10,000",
+        "deadline": today + timedelta(days=19),
+        "notes": "For students demonstrating academic excellence, leadership, and a commitment to community impact.",
+        "requirements": [
+            {"id": new_id(), "title": "Personal statement", "done": True},
+            {"id": new_id(), "title": "Academic transcript", "done": True},
+            {"id": new_id(), "title": "Two recommendation letters", "done": False},
+            {"id": new_id(), "title": "Financial information form", "done": False},
+            {"id": new_id(), "title": "Final application review", "done": False},
+        ],
+    }
     return DashboardSchema.model_validate(
         {
             "tasks": [
@@ -73,20 +88,8 @@ def seed_dashboard() -> DashboardSchema:
                 {"id": new_id(), "title": "Plan tomorrow’s priorities", "time": "9:00 PM", "end_time": "9:30 PM", "category": "Personal", "date": today, "completed": False},
             ],
             "missions": [],
-            "scholarship": {
-                "name": "Global Future Leaders Scholarship",
-                "provider": "Bright Horizons Foundation",
-                "amount": "$10,000",
-                "deadline": today + timedelta(days=19),
-                "notes": "For students demonstrating academic excellence, leadership, and a commitment to community impact.",
-                "requirements": [
-                    {"id": new_id(), "title": "Personal statement", "done": True},
-                    {"id": new_id(), "title": "Academic transcript", "done": True},
-                    {"id": new_id(), "title": "Two recommendation letters", "done": False},
-                    {"id": new_id(), "title": "Financial information form", "done": False},
-                    {"id": new_id(), "title": "Final application review", "done": False},
-                ],
-            },
+            "scholarships": [default_scholarship],
+            "scholarship": default_scholarship,
             "weights": [
                 {"id": new_id(), "date": today - timedelta(days=35), "value": 82.4},
                 {"id": new_id(), "date": today - timedelta(days=28), "value": 81.8},
@@ -112,33 +115,44 @@ def seed_dashboard() -> DashboardSchema:
 
 
 def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> None:
-    db.execute(delete(Requirement).where(Requirement.workspace_id == workspace))
-    db.execute(delete(Scholarship).where(Scholarship.workspace_id == workspace))
+    db.execute(delete(ScholarshipRequirement).where(ScholarshipRequirement.workspace_id == workspace))
+    db.execute(delete(ScholarshipEntry).where(ScholarshipEntry.workspace_id == workspace))
     db.execute(delete(Task).where(Task.workspace_id == workspace))
     db.execute(delete(Mission).where(Mission.workspace_id == workspace))
     db.execute(delete(WeightEntry).where(WeightEntry.workspace_id == workspace))
     db.execute(delete(Workout).where(Workout.workspace_id == workspace))
     db.execute(delete(Meal).where(Meal.workspace_id == workspace))
 
-    scholarship = Scholarship(
-        workspace_id=workspace,
-        name=payload.scholarship.name,
-        provider=payload.scholarship.provider,
-        amount=payload.scholarship.amount,
-        deadline=payload.scholarship.deadline,
-        notes=payload.scholarship.notes,
-    )
-    scholarship.requirements = [
-        Requirement(
+    scholarships = list(payload.scholarships)
+    if payload.scholarship is not None:
+        if not scholarships:
+            scholarships = [payload.scholarship]
+        elif payload.scholarship.model_dump() != scholarships[0].model_dump():
+            # An older cached frontend updates the legacy singular field.
+            scholarships[0] = payload.scholarship
+
+    for item in scholarships:
+        scholarship = ScholarshipEntry(
             id=item.id,
             workspace_id=workspace,
-            title=item.title,
-            done=item.done,
-            position=index,
+            name=item.name,
+            provider=item.provider,
+            amount=item.amount,
+            deadline=item.deadline,
+            notes=item.notes,
         )
-        for index, item in enumerate(payload.scholarship.requirements)
-    ]
-    db.add(scholarship)
+        scholarship.requirements = [
+            ScholarshipRequirement(
+                id=requirement.id,
+                scholarship_id=item.id,
+                workspace_id=workspace,
+                title=requirement.title,
+                done=requirement.done,
+                position=index,
+            )
+            for index, requirement in enumerate(item.requirements)
+        ]
+        db.add(scholarship)
     db.add_all([Task(workspace_id=workspace, **item.model_dump()) for item in payload.tasks])
     db.add_all([Mission(workspace_id=workspace, **item.model_dump()) for item in payload.missions])
     db.add_all([WeightEntry(workspace_id=workspace, **item.model_dump()) for item in payload.weights])
@@ -148,32 +162,40 @@ def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> 
 
 
 def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
-    scholarship = db.scalar(
-        select(Scholarship)
-        .options(selectinload(Scholarship.requirements))
-        .where(Scholarship.workspace_id == workspace)
-    )
-    if scholarship is None:
-        return None
-
+    scholarships = db.scalars(
+        select(ScholarshipEntry)
+        .options(selectinload(ScholarshipEntry.requirements))
+        .where(ScholarshipEntry.workspace_id == workspace)
+        .order_by(ScholarshipEntry.deadline, ScholarshipEntry.name)
+    ).all()
     tasks = db.scalars(select(Task).where(Task.workspace_id == workspace).order_by(Task.date, Task.time)).all()
     missions = db.scalars(select(Mission).where(Mission.workspace_id == workspace).order_by(Mission.date, Mission.id)).all()
     weights = db.scalars(select(WeightEntry).where(WeightEntry.workspace_id == workspace).order_by(WeightEntry.date)).all()
     workouts = db.scalars(select(Workout).where(Workout.workspace_id == workspace).order_by(Workout.day, Workout.time)).all()
     meals = db.scalars(select(Meal).where(Meal.workspace_id == workspace).order_by(Meal.type, Meal.title)).all()
 
+    if not any((scholarships, tasks, missions, weights, workouts, meals)):
+        return None
+
+    scholarship_data = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "provider": item.provider,
+            "amount": item.amount,
+            "deadline": item.deadline,
+            "notes": item.notes,
+            "requirements": [{"id": requirement.id, "title": requirement.title, "done": requirement.done} for requirement in item.requirements],
+        }
+        for item in scholarships
+    ]
+
     return DashboardSchema.model_validate(
         {
             "tasks": [{"id": item.id, "title": item.title, "time": item.time, "end_time": item.end_time, "category": item.category, "date": item.date, "completed": item.completed} for item in tasks],
             "missions": [{"id": item.id, "title": item.title, "date": item.date, "category": item.category, "xp": item.xp, "completed": item.completed} for item in missions],
-            "scholarship": {
-                "name": scholarship.name,
-                "provider": scholarship.provider,
-                "amount": scholarship.amount,
-                "deadline": scholarship.deadline,
-                "notes": scholarship.notes,
-                "requirements": [{"id": item.id, "title": item.title, "done": item.done} for item in scholarship.requirements],
-            },
+            "scholarships": scholarship_data,
+            "scholarship": scholarship_data[0] if scholarship_data else None,
             "weights": [{"id": item.id, "date": item.date, "value": item.value} for item in weights],
             "workouts": [{"id": item.id, "day": item.day, "title": item.title, "detail": item.detail, "time": item.time, "done": item.done} for item in workouts],
             "meals": [{"id": item.id, "type": item.type, "title": item.title, "detail": item.detail, "calories": item.calories} for item in meals],
@@ -182,8 +204,11 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
 
 
 def response_for(payload: DashboardSchema) -> DashboardResponse:
+    response_data = payload.model_dump()
+    if response_data["scholarship"] is None and response_data["scholarships"]:
+        response_data["scholarship"] = response_data["scholarships"][0]
     return DashboardResponse(
-        **payload.model_dump(),
+        **response_data,
         synced_at=datetime.now(timezone.utc).isoformat(),
     )
 

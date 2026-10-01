@@ -64,7 +64,8 @@ const seedData = () => ({
     { id: crypto.randomUUID(), title: 'Plan tomorrow’s priorities', time: '9:00 PM', end_time: '9:30 PM', category: 'Personal', date: localISO(), completed: false },
   ],
   missions: [],
-  scholarship: {
+  scholarships: [{
+    id: crypto.randomUUID(),
     name: 'Global Future Leaders Scholarship',
     provider: 'Bright Horizons Foundation',
     amount: '$10,000',
@@ -77,7 +78,7 @@ const seedData = () => ({
       { id: crypto.randomUUID(), title: 'Financial information form', done: false },
       { id: crypto.randomUUID(), title: 'Final application review', done: false },
     ],
-  },
+  }],
   weights: [
     { id: crypto.randomUUID(), date: addDays(-35), value: 82.4 },
     { id: crypto.randomUUID(), date: addDays(-28), value: 81.8 },
@@ -100,6 +101,16 @@ const seedData = () => ({
   ],
 })
 
+function normalizeDashboard(value) {
+  const { scholarship: legacyScholarship, ...dashboard } = value
+  const scholarships = Array.isArray(value.scholarships) && value.scholarships.length
+    ? value.scholarships
+    : legacyScholarship
+      ? [{ ...legacyScholarship, id: legacyScholarship.id || crypto.randomUUID() }]
+      : []
+  return { ...dashboard, scholarships }
+}
+
 function getWorkspaceId() {
   // Daymark is currently a single-user workspace. A stable ID lets the same
   // dashboard sync across TKRowling's phone and laptop instead of creating a
@@ -112,7 +123,7 @@ function useDashboardData() {
   const [data, setData] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
-      return saved ? JSON.parse(saved) : seedData()
+      return saved ? normalizeDashboard(JSON.parse(saved)) : seedData()
     } catch {
       return seedData()
     }
@@ -153,7 +164,8 @@ function useDashboardData() {
         }
 
         if (!response.ok) throw new Error(`API responded with ${response.status}`)
-        const { synced_at: _syncedAt, ...dashboard } = await response.json()
+        const { synced_at: _syncedAt, ...responseData } = await response.json()
+        const dashboard = normalizeDashboard(responseData)
         setData(dashboard)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboard))
         isHydrated.current = true
@@ -219,7 +231,7 @@ const daysUntil = (value) => Math.max(0, Math.ceil((new Date(`${value}T23:59:59`
 
 const categoryClass = (category) => category.toLowerCase().replaceAll(' ', '-')
 
-function Sidebar({ page, setPage, open, setOpen }) {
+function Sidebar({ page, setPage, open, setOpen, scholarshipCount }) {
   const nav = [
     { id: 'system', label: 'Ascension system', icon: Swords },
     { id: 'daily', label: 'Daily activities', icon: LayoutList },
@@ -259,7 +271,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
             {nav.slice(1).map(({ id, label, icon: Icon }) => (
               <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => navigate(id)}>
                 <Icon size={19} /> <span>{label}</span>
-                {id === 'scholarship' && <span className="nav-badge">2</span>}
+                {id === 'scholarship' && <span className="nav-badge">{scholarshipCount}</span>}
               </button>
             ))}
           </nav>
@@ -324,7 +336,7 @@ function SystemPage({ data, setData }) {
   const missionInputRef = useRef(null)
   const missions = data.missions ?? []
   const completedMissions = missions.filter((mission) => mission.completed)
-  const completedRequirements = data.scholarship.requirements.filter((item) => item.done)
+  const completedRequirements = (data.scholarships ?? []).flatMap((scholarship) => scholarship.requirements).filter((item) => item.done)
   const completedWorkouts = data.workouts.filter((item) => item.done)
   const weightLogs = Math.max(0, data.weights.length - 1)
   const missionXp = completedMissions.reduce((total, mission) => total + (Number(mission.xp) || 25), 0)
@@ -613,33 +625,106 @@ function StatCard({ icon: Icon, label, value, helper, tone }) {
 }
 
 function ScholarshipPage({ data, setData }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(data.scholarship)
+  const scholarships = data.scholarships ?? []
+  const [selectedId, setSelectedId] = useState(null)
+  const [modalMode, setModalMode] = useState(null)
+  const [draft, setDraft] = useState(() => ({ id: crypto.randomUUID(), name: '', provider: '', amount: '', deadline: addDays(30), notes: '', requirements: [] }))
   const [newRequirement, setNewRequirement] = useState('')
-  const scholarship = data.scholarship
-  const done = scholarship.requirements.filter((item) => item.done).length
-  const progress = Math.round((done / Math.max(scholarship.requirements.length, 1)) * 100)
+  const scholarship = scholarships.find((item) => item.id === selectedId)
 
-  const toggleRequirement = (id) => setData((current) => ({
+  useEffect(() => {
+    if (selectedId && !scholarship) setSelectedId(null)
+  }, [selectedId, scholarship])
+
+  const progressFor = (item) => {
+    const complete = item.requirements.filter((requirement) => requirement.done).length
+    return item.requirements.length ? Math.round((complete / item.requirements.length) * 100) : 0
+  }
+  const updateScholarship = (id, update) => setData((current) => ({
     ...current,
-    scholarship: { ...current.scholarship, requirements: current.scholarship.requirements.map((item) => item.id === id ? { ...item, done: !item.done } : item) },
+    scholarships: (current.scholarships ?? []).map((item) => item.id === id ? update(item) : item),
   }))
-  const deleteRequirement = (id) => setData((current) => ({ ...current, scholarship: { ...current.scholarship, requirements: current.scholarship.requirements.filter((item) => item.id !== id) } }))
+  const openAdd = () => {
+    setDraft({ id: crypto.randomUUID(), name: '', provider: '', amount: '', deadline: addDays(30), notes: '', requirements: [] })
+    setModalMode('add')
+  }
+  const openEdit = () => {
+    setDraft({ ...scholarship, requirements: [...scholarship.requirements] })
+    setModalMode('edit')
+  }
+  const toggleRequirement = (id) => updateScholarship(selectedId, (current) => ({
+    ...current,
+    requirements: current.requirements.map((item) => item.id === id ? { ...item, done: !item.done } : item),
+  }))
+  const deleteRequirement = (id) => updateScholarship(selectedId, (current) => ({
+    ...current,
+    requirements: current.requirements.filter((item) => item.id !== id),
+  }))
   const addRequirement = (event) => {
     event.preventDefault()
-    if (!newRequirement.trim()) return
-    setData((current) => ({ ...current, scholarship: { ...current.scholarship, requirements: [...current.scholarship.requirements, { id: crypto.randomUUID(), title: newRequirement.trim(), done: false }] } }))
+    if (!newRequirement.trim() || !scholarship) return
+    updateScholarship(selectedId, (current) => ({
+      ...current,
+      requirements: [...current.requirements, { id: crypto.randomUUID(), title: newRequirement.trim(), done: false }],
+    }))
     setNewRequirement('')
   }
   const saveDetails = (event) => {
     event.preventDefault()
-    setData((current) => ({ ...current, scholarship: { ...current.scholarship, ...draft } }))
-    setEditing(false)
+    const saved = { ...draft, name: draft.name.trim(), provider: draft.provider.trim(), amount: draft.amount.trim(), notes: draft.notes.trim() }
+    if (modalMode === 'add') {
+      setData((current) => ({ ...current, scholarships: [...(current.scholarships ?? []), saved] }))
+      setSelectedId(saved.id)
+    } else {
+      updateScholarship(saved.id, () => saved)
+    }
+    setModalMode(null)
   }
+
+  if (!scholarship) {
+    const completedApplications = scholarships.filter((item) => progressFor(item) === 100 && item.requirements.length).length
+    const openRequirements = scholarships.reduce((total, item) => total + item.requirements.filter((requirement) => !requirement.done).length, 0)
+    return (
+      <div className="page-stack inner-page scholarship-index-page">
+        <section className="page-intro scholarship-index-intro">
+          <div><p className="eyebrow"><span /> SCHOLARSHIP PORTFOLIO</p><h1>Build every application in one place.</h1><p>Add scholarships from Japan, Korea, or anywhere else, then track each application separately.</p></div>
+          <button className="primary-button add-scholarship-button" onClick={openAdd}><Plus size={18} /> Add scholarship</button>
+        </section>
+
+        <div className="stats-row scholarship-stats">
+          <StatCard icon={Award} label="Applications" value={scholarships.length} helper="Tracked separately" tone="coral" />
+          <StatCard icon={CheckCircle2} label="Ready to submit" value={completedApplications} helper="All requirements done" tone="green" />
+          <StatCard icon={Target} label="Open requirements" value={openRequirements} helper="Across all scholarships" tone="purple" />
+        </div>
+
+        {scholarships.length ? <section className="scholarship-portfolio-grid">
+          {scholarships.map((item) => {
+            const done = item.requirements.filter((requirement) => requirement.done).length
+            const progress = progressFor(item)
+            return <button className="card scholarship-portfolio-card" key={item.id} onClick={() => setSelectedId(item.id)}>
+              <div className="scholarship-card-head"><span className="scholarship-mark"><Award size={24} /></span><span className={`application-status ${progress === 100 && item.requirements.length ? 'ready' : ''}`}>{progress === 100 && item.requirements.length ? 'READY' : 'IN PROGRESS'}</span></div>
+              <span className="card-kicker">APPLICATION</span>
+              <h2>{item.name}</h2>
+              <p>{item.provider || 'Provider not added yet'}</p>
+              <div className="scholarship-card-meta"><span><CalendarDays size={15} /> {formatDate(item.deadline, { year: 'numeric' })}</span><strong>{item.amount || 'Award TBD'}</strong></div>
+              <div className="progress-line large"><i style={{ width: `${progress}%` }} /></div>
+              <div className="scholarship-card-footer"><span>{done} of {item.requirements.length} requirements · {progress}%</span><strong>Open application <ChevronRight size={16} /></strong></div>
+            </button>
+          })}
+        </section> : <div className="card scholarship-empty"><Award size={30} /><h2>No scholarships yet</h2><p>Add your first scholarship and give it its own application workspace.</p><button className="primary-button" onClick={openAdd}><Plus size={17} /> Add scholarship</button></div>}
+
+        {modalMode === 'add' && <ScholarshipModal mode="add" draft={draft} setDraft={setDraft} onClose={() => setModalMode(null)} onSave={saveDetails} />}
+      </div>
+    )
+  }
+
+  const done = scholarship.requirements.filter((item) => item.done).length
+  const progress = progressFor(scholarship)
 
   return (
     <div className="page-stack inner-page">
-      <PageIntro eyebrow="SCHOLARSHIP" title="Turn ambition into an application." text="Keep every detail, deadline, and requirement in one calm place." icon={Award} />
+      <button className="scholarship-back" onClick={() => { setSelectedId(null); setNewRequirement('') }}><ChevronLeft size={17} /> All scholarships</button>
+      <PageIntro eyebrow="APPLICATION WORKSPACE" title={scholarship.name} text="Track this scholarship independently from every other application." icon={Award} />
       <section className="scholarship-hero card">
         <div className="scholarship-main">
           <span className="scholarship-mark"><Award size={29} /></span>
@@ -647,7 +732,7 @@ function ScholarshipPage({ data, setData }) {
         </div>
         <div className="deadline-display"><span>Deadline</span><strong>{formatDate(scholarship.deadline, { year: 'numeric' })}</strong><small>{daysUntil(scholarship.deadline)} days remaining</small></div>
         <div className="amount-display"><span>Award</span><strong>{scholarship.amount}</strong><small>Potential funding</small></div>
-        <button className="secondary-button" onClick={() => { setDraft(scholarship); setEditing(true) }}><Edit3 size={16} /> Edit details</button>
+        <button className="secondary-button" onClick={openEdit}><Edit3 size={16} /> Edit details</button>
       </section>
 
       <section className="two-col-grid scholarship-layout">
@@ -667,7 +752,7 @@ function ScholarshipPage({ data, setData }) {
               </div>
             ))}
           </div>
-          <form className="inline-add" onSubmit={addRequirement}><input value={newRequirement} onChange={(e) => setNewRequirement(e.target.value)} placeholder="Add another requirement..." /><button><Plus size={17} /> Add</button></form>
+          <form className="inline-add" onSubmit={addRequirement}><input value={newRequirement} onChange={(e) => setNewRequirement(e.target.value)} placeholder="Add a requirement for this scholarship..." /><button><Plus size={17} /> Add requirement</button></form>
         </div>
         <div className="side-column">
           <div className="card detail-card"><span className="detail-icon"><FileText size={20} /></span><div><span className="card-kicker">ABOUT THIS SCHOLARSHIP</span><h3>Important details</h3><p>{scholarship.notes}</p></div></div>
@@ -676,17 +761,21 @@ function ScholarshipPage({ data, setData }) {
         </div>
       </section>
 
-      {editing && <Modal title="Edit scholarship details" onClose={() => setEditing(false)}>
-        <form className="modal-form" onSubmit={saveDetails}>
-          <label><span>Scholarship name</span><input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} required /></label>
-          <label><span>Provider</span><input value={draft.provider} onChange={(e) => setDraft({ ...draft, provider: e.target.value })} /></label>
-          <div className="form-row"><label><span>Award amount</span><input value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} /></label><label><span>Deadline</span><input type="date" value={draft.deadline} onChange={(e) => setDraft({ ...draft, deadline: e.target.value })} required /></label></div>
-          <label><span>Details & eligibility</span><textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows="4" /></label>
-          <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditing(false)}>Cancel</button><button className="primary-button">Save changes</button></div>
-        </form>
-      </Modal>}
+      {modalMode === 'edit' && <ScholarshipModal mode="edit" draft={draft} setDraft={setDraft} onClose={() => setModalMode(null)} onSave={saveDetails} />}
     </div>
   )
+}
+
+function ScholarshipModal({ mode, draft, setDraft, onClose, onSave }) {
+  return <Modal title={mode === 'add' ? 'Add a scholarship' : 'Edit scholarship details'} onClose={onClose}>
+    <form className="modal-form" onSubmit={onSave}>
+      <label><span>Scholarship name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. Japan MEXT Scholarship" required /></label>
+      <label><span>Provider or country</span><input value={draft.provider} onChange={(event) => setDraft({ ...draft, provider: event.target.value })} placeholder="e.g. Government of Japan" /></label>
+      <div className="form-row"><label><span>Award amount</span><input value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="e.g. Full tuition" /></label><label><span>Deadline</span><input type="date" value={draft.deadline} onChange={(event) => setDraft({ ...draft, deadline: event.target.value })} required /></label></div>
+      <label><span>Details & eligibility</span><textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows="4" placeholder="Add eligibility, documents, links, or important notes..." /></label>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button">{mode === 'add' ? 'Create scholarship' : 'Save changes'}</button></div>
+    </form>
+  </Modal>
 }
 
 function WeightPage({ data, setData }) {
@@ -866,7 +955,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar page={page} setPage={setPage} open={menuOpen} setOpen={setMenuOpen} />
+      <Sidebar page={page} setPage={setPage} open={menuOpen} setOpen={setMenuOpen} scholarshipCount={(data.scholarships ?? []).length} />
       <main className="main-area">
         <Topbar title={titles[page]} onMenu={() => setMenuOpen(true)} apiStatus={apiStatus} onRetry={retryApi} />
         <div className="page-content">

@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -29,6 +30,7 @@ class RequirementSchema(BaseModel):
 
 
 class ScholarshipSchema(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=36)
     name: str = Field(min_length=1, max_length=240)
     provider: str = Field(default="", max_length=240)
     amount: str = Field(default="", max_length=80)
@@ -71,7 +73,8 @@ class MealSchema(BaseModel):
 class DashboardSchema(BaseModel):
     tasks: list[TaskSchema] = Field(default_factory=list, max_length=500)
     missions: list[MissionSchema] = Field(default_factory=list, max_length=500)
-    scholarship: ScholarshipSchema
+    scholarships: list[ScholarshipSchema] = Field(default_factory=list, max_length=100)
+    scholarship: ScholarshipSchema | None = None
     weights: list[WeightSchema] = Field(default_factory=list, max_length=1000)
     workouts: list[WorkoutSchema] = Field(default_factory=list, max_length=200)
     meals: list[MealSchema] = Field(default_factory=list, max_length=200)

@@ -65,6 +65,39 @@ class Requirement(Base):
     scholarship: Mapped[Scholarship] = relationship(back_populates="requirements")
 
 
+class ScholarshipEntry(Base):
+    __tablename__ = "scholarship_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(240))
+    provider: Mapped[str] = mapped_column(String(240), default="")
+    amount: Mapped[str] = mapped_column(String(80), default="")
+    deadline: Mapped[date] = mapped_column(Date)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    requirements: Mapped[list["ScholarshipRequirement"]] = relationship(
+        back_populates="scholarship",
+        cascade="all, delete-orphan",
+        order_by="ScholarshipRequirement.position",
+    )
+
+
+class ScholarshipRequirement(Base):
+    __tablename__ = "scholarship_requirements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    scholarship_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("scholarship_entries.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    scholarship: Mapped[ScholarshipEntry] = relationship(back_populates="requirements")
+
+
 class WeightEntry(Base):
     __tablename__ = "weight_entries"
     __table_args__ = (UniqueConstraint("workspace_id", "date", name="uq_weight_workspace_date"),)

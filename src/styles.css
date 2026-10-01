@@ -1274,3 +1274,62 @@ textarea { min-height: 112px; }
   .system-quest i { font-size: 9px; }
   .unspent-points { display: none; }
 }
+
+/* Scholarship portfolio and individual application workspaces */
+.scholarship-index-intro { align-items: flex-end; }
+.scholarship-index-intro > div { max-width: 900px; }
+.add-scholarship-button { flex: none; min-height: 52px; padding-inline: 21px; border-radius: 6px; text-transform: uppercase; letter-spacing: .7px; }
+.scholarship-stats { margin-top: -4px; }
+.scholarship-portfolio-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.scholarship-portfolio-card {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 25px 27px;
+  color: #e9e4de;
+  border: 1px solid #343230;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(223, 52, 47, .12), transparent 33%),
+    linear-gradient(145deg, rgba(24, 23, 23, .98), rgba(15, 15, 15, .98));
+  text-align: left;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.scholarship-portfolio-card:hover { transform: translateY(-3px); border-color: rgba(239, 72, 65, .55); box-shadow: 0 25px 65px rgba(0, 0, 0, .45); }
+.scholarship-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.scholarship-portfolio-card .scholarship-mark { width: 48px; height: 48px; border: 1px solid rgba(223, 52, 47, .25); border-radius: 8px; color: #ff5f57; background: rgba(223, 52, 47, .12); }
+.application-status { padding: 6px 9px; color: #ff7770; border: 1px solid rgba(223, 52, 47, .24); border-radius: 4px; background: rgba(223, 52, 47, .08); font: 800 10px 'Inter', sans-serif; letter-spacing: 1px; }
+.application-status.ready { color: #7ef5bd; border-color: rgba(80, 229, 162, .24); background: rgba(30, 146, 101, .1); }
+.scholarship-portfolio-card h2 { margin: 7px 0 5px; color: #f5f0e9; font: 800 26px/1.1 'Barlow Condensed', sans-serif; text-transform: uppercase; }
+.scholarship-portfolio-card > p { min-height: 25px; margin: 0 0 24px; color: #8e8984; font-size: 14px; }
+.scholarship-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: auto; color: #aaa49e; font-size: 13px; }
+.scholarship-card-meta span { display: inline-flex; align-items: center; gap: 7px; }
+.scholarship-card-meta svg { color: #ff5f57; }
+.scholarship-card-meta strong { color: #e8e2db; font-size: 13px; }
+.scholarship-portfolio-card .progress-line { margin-top: 18px; background: #2b2928; }
+.scholarship-portfolio-card .progress-line i { background: linear-gradient(90deg, #d92722, #ff5a52); }
+.scholarship-card-footer { display: flex; justify-content: space-between; gap: 15px; margin-top: 10px; color: #77726e; font-size: 12px; }
+.scholarship-card-footer strong { display: inline-flex; align-items: center; gap: 5px; color: #ff6a63; white-space: nowrap; }
+.scholarship-empty { min-height: 320px; display: grid; place-content: center; justify-items: center; padding: 35px; text-align: center; }
+.scholarship-empty > svg { color: #ff5f57; }
+.scholarship-empty h2 { margin: 14px 0 3px; color: #f2ede7; }
+.scholarship-empty p { margin: 0 0 20px; color: #8d8883; }
+.scholarship-back { width: fit-content; display: inline-flex; align-items: center; gap: 6px; margin-bottom: -12px; padding: 7px 0; color: #ff6b64; background: transparent; font-size: 13px; font-weight: 800; }
+.scholarship-back:hover { color: #ff938e; }
+.inline-add button { min-width: 145px; }
+
+@media (max-width: 900px) {
+  .scholarship-index-intro { align-items: flex-start; flex-direction: column; }
+  .scholarship-portfolio-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 580px) {
+  .add-scholarship-button { width: 100%; }
+  .scholarship-portfolio-card { min-height: 280px; padding: 21px 19px; }
+  .scholarship-card-footer { align-items: flex-start; flex-direction: column; }
+  .scholarship-card-meta { align-items: flex-start; flex-direction: column; }
+  .scholarship-stats { grid-template-columns: 1fr; }
+  .inline-add { flex-direction: column; }
+  .inline-add button { min-height: 44px; }
+}
