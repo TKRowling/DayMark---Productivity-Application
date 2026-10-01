@@ -200,8 +200,7 @@ def get_dashboard(
 ) -> DashboardResponse:
     dashboard = read_dashboard(db, workspace)
     if dashboard is None:
-        dashboard = seed_dashboard()
-        replace_dashboard(db, workspace, dashboard)
+        raise HTTPException(status_code=404, detail="Dashboard not found")
     return response_for(dashboard)
 
 

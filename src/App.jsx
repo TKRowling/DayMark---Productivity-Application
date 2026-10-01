@@ -41,6 +41,7 @@ import {
 
 const STORAGE_KEY = 'daymark-dashboard-v1'
 const WORKSPACE_KEY = 'daymark-workspace-id'
+const SHARED_WORKSPACE_ID = 'tkrowling-dashboard'
 
 const localISO = (date = new Date()) => {
   const offset = date.getTimezoneOffset() * 60_000
@@ -98,11 +99,11 @@ const seedData = () => ({
 })
 
 function getWorkspaceId() {
-  const existing = localStorage.getItem(WORKSPACE_KEY)
-  if (existing) return existing
-  const created = crypto.randomUUID()
-  localStorage.setItem(WORKSPACE_KEY, created)
-  return created
+  // Daymark is currently a single-user workspace. A stable ID lets the same
+  // dashboard sync across TKRowling's phone and laptop instead of creating a
+  // separate backend record for every browser.
+  localStorage.setItem(WORKSPACE_KEY, SHARED_WORKSPACE_ID)
+  return SHARED_WORKSPACE_ID
 }
 
 function useDashboardData() {
@@ -117,7 +118,6 @@ function useDashboardData() {
   const [apiStatus, setApiStatus] = useState('connecting')
   const [retryToken, setRetryToken] = useState(0)
   const isHydrated = useRef(false)
-  const hadSavedData = useRef(Boolean(localStorage.getItem(STORAGE_KEY)))
   const workspaceId = useRef(getWorkspaceId())
 
   useEffect(() => {
@@ -126,21 +126,34 @@ function useDashboardData() {
     const connect = async () => {
       setApiStatus('connecting')
       try {
-        const useLocalCopy = hadSavedData.current
-        const response = await fetch('/api/dashboard', {
-          method: useLocalCopy ? 'PUT' : 'GET',
+        let response = await fetch('/api/dashboard', {
+          method: 'GET',
           headers: {
             'Content-Type': 'application/json',
             'X-Workspace-ID': workspaceId.current,
           },
-          body: useLocalCopy ? JSON.stringify(data) : undefined,
           signal: controller.signal,
         })
+
+        // A brand-new shared workspace starts with this device's local copy.
+        // Existing workspaces always remain server-first to prevent stale data
+        // from another browser overwriting newer activities.
+        if (response.status === 404) {
+          response = await fetch('/api/dashboard', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Workspace-ID': workspaceId.current,
+            },
+            body: JSON.stringify(data),
+            signal: controller.signal,
+          })
+        }
+
         if (!response.ok) throw new Error(`API responded with ${response.status}`)
         const { synced_at: _syncedAt, ...dashboard } = await response.json()
         setData(dashboard)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboard))
-        hadSavedData.current = true
         isHydrated.current = true
         setApiStatus('synced')
       } catch (error) {
@@ -191,7 +204,6 @@ function useDashboardData() {
   }, [data])
 
   const retry = () => {
-    hadSavedData.current = true
     setRetryToken((value) => value + 1)
   }
 

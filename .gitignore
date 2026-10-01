@@ -10,6 +10,8 @@ backend/.pytest_cache/
 *.pyc
 .venv/
 .vscode/
+.agents/
+skills-lock.json
 .env*.local
 !.env.example
 !backend/.env.example
