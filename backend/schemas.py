@@ -12,6 +12,16 @@ class TaskSchema(BaseModel):
     completed: bool = False
 
 
+class MissionSchema(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    title: str = Field(min_length=1, max_length=240)
+    date: date
+    time: str = Field(max_length=20)
+    category: str = Field(min_length=1, max_length=50)
+    xp: int = Field(default=25, ge=5, le=500)
+    completed: bool = False
+
+
 class RequirementSchema(BaseModel):
     id: str = Field(min_length=1, max_length=36)
     title: str = Field(min_length=1, max_length=240)
@@ -60,6 +70,7 @@ class MealSchema(BaseModel):
 
 class DashboardSchema(BaseModel):
     tasks: list[TaskSchema] = Field(default_factory=list, max_length=500)
+    missions: list[MissionSchema] = Field(default_factory=list, max_length=500)
     scholarship: ScholarshipSchema
     weights: list[WeightSchema] = Field(default_factory=list, max_length=1000)
     workouts: list[WorkoutSchema] = Field(default_factory=list, max_length=200)

@@ -18,6 +18,19 @@ class Task(Base):
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Mission(Base):
+    __tablename__ = "missions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    date: Mapped[date] = mapped_column(Date)
+    time: Mapped[str] = mapped_column(String(20))
+    category: Mapped[str] = mapped_column(String(50))
+    xp: Mapped[int] = mapped_column(Integer, default=25)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Scholarship(Base):
     __tablename__ = "scholarships"
 

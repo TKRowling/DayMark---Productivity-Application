@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   AlertCircle,
-  ArrowDownRight,
-  ArrowRight,
   Award,
   Beef,
   Bell,
@@ -14,7 +12,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Circle,
   Clock3,
   Cloud,
   CloudOff,
@@ -23,7 +20,6 @@ import {
   FileText,
   Flame,
   HeartPulse,
-  Home,
   LayoutList,
   Menu,
   MoreHorizontal,
@@ -67,6 +63,7 @@ const seedData = () => ({
     { id: crypto.randomUUID(), title: 'Upper body workout', time: '6:30 PM', category: 'Fitness', date: localISO(), completed: false },
     { id: crypto.randomUUID(), title: 'Plan tomorrow’s priorities', time: '9:00 PM', category: 'Personal', date: localISO(), completed: false },
   ],
+  missions: [],
   scholarship: {
     name: 'Global Future Leaders Scholarship',
     provider: 'Bright Horizons Foundation',
@@ -224,7 +221,6 @@ const categoryClass = (category) => category.toLowerCase().replaceAll(' ', '-')
 
 function Sidebar({ page, setPage, open, setOpen }) {
   const nav = [
-    { id: 'overview', label: 'Overview', icon: Home },
     { id: 'system', label: 'Ascension system', icon: Swords },
     { id: 'daily', label: 'Daily activities', icon: LayoutList },
     { id: 'scholarship', label: 'Scholarship', icon: Award },
@@ -241,7 +237,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
     <>
       <button className={`sidebar-shade ${open ? 'visible' : ''}`} onClick={() => setOpen(false)} aria-label="Close menu" />
       <aside className={`sidebar ${open ? 'open' : ''}`}>
-        <button className="brand" onClick={() => navigate('overview')}>
+        <button className="brand" onClick={() => navigate('system')}>
           <span className="brand-mark"><Check size={20} strokeWidth={3} /></span>
           <span>daymark<span className="brand-dot">.</span></span>
         </button>
@@ -249,7 +245,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
         <div className="sidebar-block">
           <p className="sidebar-label">Workspace</p>
           <nav>
-            {nav.slice(0, 2).map(({ id, label, icon: Icon }) => (
+            {nav.slice(0, 1).map(({ id, label, icon: Icon }) => (
               <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => navigate(id)}>
                 <Icon size={19} /> <span>{label}</span>
               </button>
@@ -260,7 +256,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
         <div className="sidebar-block goals-block">
           <p className="sidebar-label">My goals</p>
           <nav>
-            {nav.slice(2).map(({ id, label, icon: Icon }) => (
+            {nav.slice(1).map(({ id, label, icon: Icon }) => (
               <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => navigate(id)}>
                 <Icon size={19} /> <span>{label}</span>
                 {id === 'scholarship' && <span className="nav-badge">2</span>}
@@ -307,80 +303,6 @@ function Topbar({ title, onMenu, apiStatus, onRetry }) {
   )
 }
 
-function ProgressRing({ value, size = 76 }) {
-  return (
-    <div className="progress-ring" style={{ '--progress': `${value * 3.6}deg`, width: size, height: size }}>
-      <div><strong>{value}%</strong><span>done</span></div>
-    </div>
-  )
-}
-
-function Overview({ data, setData, setPage }) {
-  const todayTasks = data.tasks.filter((task) => task.date === localISO())
-  const completed = todayTasks.filter((task) => task.completed).length
-  const completion = todayTasks.length ? Math.round((completed / todayTasks.length) * 100) : 0
-  const requirementsDone = data.scholarship.requirements.filter((item) => item.done).length
-  const scholarshipProgress = Math.round((requirementsDone / data.scholarship.requirements.length) * 100)
-  const latest = data.weights.at(-1)?.value || 0
-  const start = data.weights.at(0)?.value || latest
-  const change = (latest - start).toFixed(1)
-
-  const toggleTask = (id) => setData((current) => ({
-    ...current,
-    tasks: current.tasks.map((task) => task.id === id ? { ...task, completed: !task.completed } : task),
-  }))
-
-  return (
-    <div className="page-stack">
-      <section className="welcome-row">
-        <div>
-          <p className="eyebrow"><span /> YOUR DAY AT A GLANCE</p>
-          <h1>Good morning, TKRowling.</h1>
-          <p>Here’s what’s happening today. Keep the momentum going.</p>
-        </div>
-        <div className="daily-score"><ProgressRing value={completion} /><div><span>Daily progress</span><strong>{completed} of {todayTasks.length} tasks</strong><small>{todayTasks.length - completed} left to complete</small></div></div>
-      </section>
-
-      <section className="overview-grid">
-        <div className="card tasks-card">
-          <div className="card-head">
-            <div><span className="card-kicker">TODAY</span><h2>Daily activities</h2></div>
-            <button className="text-button" onClick={() => setPage('daily')}>View all <ArrowRight size={15} /></button>
-          </div>
-          <div className="task-list compact">
-            {todayTasks.slice(0, 5).map((task) => <TaskRow key={task.id} task={task} onToggle={toggleTask} />)}
-          </div>
-          <button className="add-row" onClick={() => setPage('daily')}><Plus size={17} /> Add a new task</button>
-        </div>
-
-        <div className="right-stack">
-          <button className="card goal-card scholarship-card" onClick={() => setPage('scholarship')}>
-            <div className="goal-card-top"><span className="goal-icon coral"><Award size={19} /></span><span className="deadline-pill"><Clock3 size={13} /> {daysUntil(data.scholarship.deadline)} days left</span></div>
-            <p className="card-kicker">SCHOLARSHIP GOAL</p>
-            <h3>{data.scholarship.name}</h3>
-            <div className="progress-line"><i style={{ width: `${scholarshipProgress}%` }} /></div>
-            <div className="progress-meta"><span>{requirementsDone} of {data.scholarship.requirements.length} complete</span><strong>{scholarshipProgress}%</strong></div>
-            <div className="goal-footer"><span>Deadline · {formatDate(data.scholarship.deadline, { year: 'numeric' })}</span><ArrowRight size={17} /></div>
-          </button>
-
-          <button className="card goal-card weight-card" onClick={() => setPage('weight')}>
-            <div className="goal-card-top"><span className="goal-icon green"><Scale size={19} /></span><span className="trend-pill"><TrendingDown size={13} /> On track</span></div>
-            <p className="card-kicker">WEIGHT GOAL</p>
-            <div className="weight-summary"><h3>{latest}<small> kg</small></h3><span><ArrowDownRight size={15} /> {Math.abs(change)} kg</span></div>
-            <MiniChart data={data.weights} />
-            <div className="goal-footer"><span>Started at {start} kg</span><span>Goal 75 kg</span></div>
-          </button>
-        </div>
-      </section>
-
-      <section className="bottom-grid">
-        <ScheduleCard workouts={data.workouts} onOpen={() => setPage('wellness')} />
-        <NutritionCard meals={data.meals} onOpen={() => setPage('wellness')} />
-      </section>
-    </div>
-  )
-}
-
 function TaskRow({ task, onToggle, onDelete, detailed = false }) {
   return (
     <div className={`task-row ${task.completed ? 'completed' : ''}`}>
@@ -395,37 +317,76 @@ function TaskRow({ task, onToggle, onDelete, detailed = false }) {
   )
 }
 
-function SystemPage({ data, setData, setPage }) {
-  const completedTasks = data.tasks.filter((task) => task.completed)
+function SystemPage({ data, setData }) {
+  const [missionFormOpen, setMissionFormOpen] = useState(false)
+  const [missionForm, setMissionForm] = useState({ title: '', time: '09:00', category: 'Training', xp: 25 })
+  const [missionError, setMissionError] = useState('')
+  const missionInputRef = useRef(null)
+  const missions = data.missions ?? []
+  const completedMissions = missions.filter((mission) => mission.completed)
   const completedRequirements = data.scholarship.requirements.filter((item) => item.done)
   const completedWorkouts = data.workouts.filter((item) => item.done)
   const weightLogs = Math.max(0, data.weights.length - 1)
-  const totalXp = (completedTasks.length * 25) + (completedRequirements.length * 40) + (completedWorkouts.length * 50) + (weightLogs * 15)
+  const missionXp = completedMissions.reduce((total, mission) => total + (Number(mission.xp) || 25), 0)
+  const totalXp = missionXp + (completedRequirements.length * 40) + (completedWorkouts.length * 50) + (weightLogs * 15)
   const xpPerLevel = 150
   const level = Math.floor(totalXp / xpPerLevel) + 1
   const currentXp = totalXp % xpPerLevel
   const xpProgress = Math.round((currentXp / xpPerLevel) * 100)
   const rank = level >= 25 ? 'S' : level >= 18 ? 'A' : level >= 12 ? 'B' : level >= 7 ? 'C' : level >= 4 ? 'D' : 'E'
-  const todayTasks = data.tasks.filter((task) => task.date === localISO())
-  const todayDone = todayTasks.filter((task) => task.completed).length
-  const dailyProgress = todayTasks.length ? Math.round((todayDone / todayTasks.length) * 100) : 0
-  const fitnessDone = completedTasks.filter((task) => ['Fitness', 'Wellness'].includes(task.category)).length
-  const focusDone = completedTasks.filter((task) => ['Study', 'Scholarship'].includes(task.category)).length
-  const personalDone = completedTasks.filter((task) => task.category === 'Personal').length
+  const todayMissions = missions.filter((mission) => mission.date === localISO())
+  const todayDone = todayMissions.filter((mission) => mission.completed).length
+  const dailyProgress = todayMissions.length ? Math.round((todayDone / todayMissions.length) * 100) : 0
+  const trainingDone = completedMissions.filter((mission) => mission.category === 'Training').length
+  const learningDone = completedMissions.filter((mission) => mission.category === 'Learning').length
+  const wellnessDone = completedMissions.filter((mission) => mission.category === 'Wellness').length
+  const disciplineDone = completedMissions.filter((mission) => ['Discipline', 'Challenge'].includes(mission.category)).length
   const stats = [
-    { label: 'Strength', value: 10 + (fitnessDone * 2) + (completedWorkouts.length * 3), icon: Swords },
-    { label: 'Vitality', value: 10 + fitnessDone + (weightLogs * 2), icon: Shield },
-    { label: 'Focus', value: 10 + (focusDone * 3) + completedRequirements.length, icon: Brain },
-    { label: 'Discipline', value: 10 + completedTasks.length + (completedWorkouts.length * 2), icon: Target },
-    { label: 'Momentum', value: 10 + (personalDone * 2) + todayDone, icon: Zap },
+    { label: 'Strength', value: 10 + (trainingDone * 2) + (completedWorkouts.length * 3), icon: Swords },
+    { label: 'Vitality', value: 10 + wellnessDone + (weightLogs * 2), icon: Shield },
+    { label: 'Focus', value: 10 + (learningDone * 3) + completedRequirements.length, icon: Brain },
+    { label: 'Discipline', value: 10 + (disciplineDone * 3) + completedMissions.length, icon: Target },
+    { label: 'Momentum', value: 10 + completedMissions.length + todayDone, icon: Zap },
   ].map((stat) => ({ ...stat, value: Math.min(stat.value, 99) }))
-  const toggleTask = (id) => setData((current) => ({
+
+  const openMissionForm = () => {
+    setMissionError('')
+    setMissionFormOpen(true)
+    window.setTimeout(() => missionInputRef.current?.focus(), 0)
+  }
+  const addMission = (event) => {
+    event.preventDefault()
+    if (!missionForm.title.trim()) {
+      setMissionError('Enter a mission name to continue.')
+      missionInputRef.current?.focus()
+      return
+    }
+    const time = new Date(`2000-01-01T${missionForm.time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    const mission = {
+      ...missionForm,
+      id: crypto.randomUUID(),
+      title: missionForm.title.trim(),
+      date: localISO(),
+      time,
+      xp: Number(missionForm.xp) || 25,
+      completed: false,
+    }
+    setData((current) => ({ ...current, missions: [...(current.missions ?? []), mission] }))
+    setMissionForm((current) => ({ ...current, title: '' }))
+    setMissionError('')
+    setMissionFormOpen(false)
+  }
+  const toggleMission = (id) => setData((current) => ({
     ...current,
-    tasks: current.tasks.map((task) => task.id === id ? { ...task, completed: !task.completed } : task),
+    missions: (current.missions ?? []).map((mission) => mission.id === id ? { ...mission, completed: !mission.completed } : mission),
   }))
-  const nextMilestone = todayTasks.length && todayDone === todayTasks.length
+  const deleteMission = (id) => setData((current) => ({
+    ...current,
+    missions: (current.missions ?? []).filter((mission) => mission.id !== id),
+  }))
+  const nextMilestone = todayMissions.length && todayDone === todayMissions.length
     ? 'Daily objective cleared. Recovery protocol available.'
-    : `${Math.max(todayTasks.length - todayDone, 0)} daily objective${todayTasks.length - todayDone === 1 ? '' : 's'} remain.`
+    : `${Math.max(todayMissions.length - todayDone, 0)} daily mission${todayMissions.length - todayDone === 1 ? '' : 's'} remain.`
 
   return (
     <div className="page-stack inner-page system-page">
@@ -454,7 +415,7 @@ function SystemPage({ data, setData, setPage }) {
           <div className="system-progress"><i style={{ width: `${xpProgress}%` }} /></div>
           <div className="system-progress-meta"><span>{xpProgress}% to next level</span><strong>{xpPerLevel - currentXp} XP REQUIRED</strong></div>
           <div className="system-metrics">
-            <div><span>QUESTS CLEARED</span><strong>{completedTasks.length}</strong></div>
+            <div><span>MISSIONS CLEARED</span><strong>{completedMissions.length}</strong></div>
             <div><span>TRAINING DONE</span><strong>{completedWorkouts.length}</strong></div>
             <div><span>MILESTONES</span><strong>{completedRequirements.length}</strong></div>
           </div>
@@ -462,20 +423,36 @@ function SystemPage({ data, setData, setPage }) {
 
         <div className="system-panel daily-quest-panel">
           <div className="system-panel-head">
-            <div><span className="system-code">DAILY QUEST</span><h2>Today&apos;s objectives</h2></div>
-            <span className={`quest-state ${dailyProgress === 100 ? 'cleared' : ''}`}>{dailyProgress === 100 ? 'CLEARED' : `${dailyProgress}%`}</span>
+            <div><span className="system-code">DAILY MISSIONS</span><h2>Today&apos;s objectives</h2></div>
+            <div className="quest-head-actions">
+              <button className="mission-add-button" onClick={openMissionForm}><Plus size={15} /> Add mission</button>
+              <span className={`quest-state ${dailyProgress === 100 && todayMissions.length ? 'cleared' : ''}`}>{dailyProgress === 100 && todayMissions.length ? 'CLEARED' : `${dailyProgress}%`}</span>
+            </div>
           </div>
+          {missionFormOpen && (
+            <form className="mission-form" onSubmit={addMission}>
+              <label className="mission-title-field"><span>Mission</span><input ref={missionInputRef} value={missionForm.title} onChange={(event) => { setMissionForm({ ...missionForm, title: event.target.value }); setMissionError('') }} placeholder="e.g. Complete 100 push-ups" aria-invalid={Boolean(missionError)} /></label>
+              <label><span>Time</span><input type="time" value={missionForm.time} onChange={(event) => setMissionForm({ ...missionForm, time: event.target.value })} /></label>
+              <label><span>Type</span><select value={missionForm.category} onChange={(event) => setMissionForm({ ...missionForm, category: event.target.value })}><option>Training</option><option>Learning</option><option>Discipline</option><option>Wellness</option><option>Challenge</option></select></label>
+              <label><span>Reward</span><select value={missionForm.xp} onChange={(event) => setMissionForm({ ...missionForm, xp: Number(event.target.value) })}><option value={15}>15 XP</option><option value={25}>25 XP</option><option value={50}>50 XP</option><option value={100}>100 XP</option></select></label>
+              <div className="mission-form-actions"><button className="mission-submit" type="submit"><Plus size={15} /> Assign</button><button className="mission-cancel" type="button" onClick={() => { setMissionFormOpen(false); setMissionError('') }}>Cancel</button></div>
+              {missionError && <p className="mission-error"><AlertCircle size={14} /> {missionError}</p>}
+            </form>
+          )}
           <div className="system-progress compact"><i style={{ width: `${dailyProgress}%` }} /></div>
           <div className="system-quest-list">
-            {todayTasks.length ? todayTasks.slice(0, 5).map((task) => (
-              <button className={`system-quest ${task.completed ? 'complete' : ''}`} key={task.id} onClick={() => toggleTask(task.id)}>
-                <span className="quest-check">{task.completed ? <Check size={14} strokeWidth={3} /> : null}</span>
-                <span><strong>{task.title}</strong><small>{task.time} · {task.category}</small></span>
-                <i>+25 XP</i>
-              </button>
-            )) : <div className="system-empty"><Target size={24} /><span>No quests assigned today.</span></div>}
+            {todayMissions.length ? todayMissions.map((mission) => (
+              <div className={`system-quest ${mission.completed ? 'complete' : ''}`} key={mission.id}>
+                <button className="quest-toggle" onClick={() => toggleMission(mission.id)} aria-label={mission.completed ? `Mark ${mission.title} incomplete` : `Complete ${mission.title}`}>
+                  <span className="quest-check">{mission.completed ? <Check size={14} strokeWidth={3} /> : null}</span>
+                  <span><strong>{mission.title}</strong><small>{mission.time} · {mission.category}</small></span>
+                </button>
+                <i>+{mission.xp} XP</i>
+                <button className="mission-delete" onClick={() => deleteMission(mission.id)} aria-label={`Delete ${mission.title}`}><Trash2 size={15} /></button>
+              </div>
+            )) : <div className="system-empty"><Target size={24} /><strong>No missions assigned today.</strong><span>Add a daily mission to begin earning XP.</span></div>}
           </div>
-          <button className="system-link" onClick={() => setPage('daily')}><Plus size={16} /> Manage daily quests <ArrowRight size={16} /></button>
+          {!missionFormOpen && <button className="system-link" onClick={openMissionForm}><Plus size={16} /> Add another daily mission</button>}
         </div>
       </section>
 
@@ -497,8 +474,8 @@ function SystemPage({ data, setData, setPage }) {
           <div className="system-panel-head"><div><span className="system-code">SYSTEM LOG</span><h2>Recent signals</h2></div><Zap size={20} /></div>
           <div className="system-feed">
             <div className="feed-item priority"><span><Trophy size={17} /></span><div><strong>Current directive</strong><p>{nextMilestone}</p></div></div>
-            <div className="feed-item"><span><CheckCircle2 size={17} /></span><div><strong>Experience synchronized</strong><p>{completedTasks.length} completed activities converted into progression.</p></div></div>
-            <div className="feed-item"><span><Brain size={17} /></span><div><strong>Focus analysis</strong><p>{focusDone ? `${focusDone} study objectives reinforced your Focus attribute.` : 'Complete a Study quest to increase Focus.'}</p></div></div>
+            <div className="feed-item"><span><CheckCircle2 size={17} /></span><div><strong>Experience synchronized</strong><p>{completedMissions.length} completed missions converted into progression.</p></div></div>
+            <div className="feed-item"><span><Brain size={17} /></span><div><strong>Focus analysis</strong><p>{learningDone ? `${learningDone} learning missions reinforced your Focus attribute.` : 'Complete a Learning mission to increase Focus.'}</p></div></div>
             <div className="feed-item"><span><Shield size={17} /></span><div><strong>Persistence active</strong><p>Your progress is secured to the shared TKRowling workspace.</p></div></div>
           </div>
         </div>
@@ -798,15 +775,6 @@ function WeightChart({ data, goal }) {
   )
 }
 
-function MiniChart({ data }) {
-  if (data.length < 2) return null
-  const values = data.map((item) => item.value)
-  const min = Math.min(...values) - 0.3
-  const max = Math.max(...values) + 0.3
-  const points = data.map((item, index) => `${(index / (data.length - 1)) * 220},${8 + ((max - item.value) / (max - min)) * 48}`).join(' ')
-  return <svg className="mini-chart" viewBox="0 0 220 65" preserveAspectRatio="none"><polyline points={points} /><circle cx="220" cy={points.split(' ').at(-1).split(',')[1]} r="4" /></svg>
-}
-
 function WellnessPage({ data, setData }) {
   const [activeTab, setActiveTab] = useState('gym')
   const [workoutForm, setWorkoutForm] = useState({ day: 'MON', title: '', detail: '', time: '18:30' })
@@ -870,15 +838,6 @@ function WellnessPage({ data, setData }) {
   )
 }
 
-function ScheduleCard({ workouts, onOpen }) {
-  return <div className="card schedule-card"><div className="card-head"><div><span className="card-kicker">THIS WEEK</span><h2>Gym schedule</h2></div><button className="text-button" onClick={onOpen}>Full schedule <ArrowRight size={15} /></button></div><div className="workout-list">{workouts.slice(0, 3).map((workout) => <div key={workout.id}><span className="day-badge">{workout.day}</span><div><strong>{workout.title}</strong><small>{workout.detail}</small></div><span className="workout-time">{workout.time}</span>{workout.done ? <CheckCircle2 size={18} className="done-icon" /> : <Circle size={18} className="open-icon" />}</div>)}</div></div>
-}
-
-function NutritionCard({ meals, onOpen }) {
-  const total = meals.reduce((sum, meal) => sum + Number(meal.calories), 0)
-  return <div className="card nutrition-card"><div className="card-head"><div><span className="card-kicker">TODAY’S FUEL</span><h2>Meal plan</h2></div><button className="text-button" onClick={onOpen}>View plan <ArrowRight size={15} /></button></div><div className="nutrition-inner"><div className="calorie-ring"><div><Utensils size={20} /><strong>{total.toLocaleString()}</strong><span>kcal planned</span></div></div><div className="meal-list">{meals.slice(0, 3).map((meal) => <div key={meal.id}><span className={`meal-dot ${meal.type.toLowerCase()}`} /><div><strong>{meal.type}</strong><small>{meal.title}</small></div><span>{meal.calories}</span></div>)}</div></div></div>
-}
-
 function Modal({ title, onClose, children }) {
   useEffect(() => {
     const handler = (event) => event.key === 'Escape' && onClose()
@@ -893,10 +852,10 @@ function EmptyState({ icon: Icon, title, text }) {
 }
 
 function App() {
-  const [page, setPage] = useState('overview')
+  const [page, setPage] = useState('system')
   const [menuOpen, setMenuOpen] = useState(false)
   const [data, setData, apiStatus, retryApi] = useDashboardData()
-  const titles = { overview: 'Overview', system: 'Ascension system', daily: 'Daily activities', scholarship: 'Scholarship', weight: 'Weight loss', wellness: 'Gym & meals' }
+  const titles = { system: 'Ascension system', daily: 'Daily activities', scholarship: 'Scholarship', weight: 'Weight loss', wellness: 'Gym & meals' }
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -908,8 +867,7 @@ function App() {
       <main className="main-area">
         <Topbar title={titles[page]} onMenu={() => setMenuOpen(true)} apiStatus={apiStatus} onRetry={retryApi} />
         <div className="page-content">
-          {page === 'overview' && <Overview data={data} setData={setData} setPage={setPage} />}
-          {page === 'system' && <SystemPage data={data} setData={setData} setPage={setPage} />}
+          {page === 'system' && <SystemPage data={data} setData={setData} />}
           {page === 'daily' && <TaskPage data={data} setData={setData} />}
           {page === 'scholarship' && <ScholarshipPage data={data} setData={setData} />}
           {page === 'weight' && <WeightPage data={data} setData={setData} />}

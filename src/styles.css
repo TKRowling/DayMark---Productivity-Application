@@ -1115,14 +1115,68 @@ textarea { min-height: 112px; }
 .system-metrics strong { display: block; margin-top: 4px; color: #dff9ff; font: 800 27px 'Barlow Condensed', sans-serif; }
 
 .quest-state.cleared { color: #7ef5bd; border-color: rgba(80, 229, 162, .3); background: rgba(30, 146, 101, .12); }
+.quest-head-actions { display: flex; align-items: center; gap: 9px; }
+.mission-add-button,
+.mission-submit,
+.mission-cancel {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 11px;
+  font: 800 10px 'Inter', sans-serif;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+.mission-add-button,
+.mission-submit {
+  color: #061019;
+  border: 1px solid var(--system-blue);
+  background: var(--system-blue);
+  box-shadow: 0 0 18px rgba(69, 216, 255, .18);
+}
+.mission-add-button:hover,
+.mission-submit:hover { background: var(--system-blue-bright); box-shadow: 0 0 22px rgba(69, 216, 255, .3); }
+.mission-form {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) 112px 130px 94px;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(69, 216, 255, .22);
+  background: rgba(22, 67, 86, .13);
+}
+.mission-form label { display: grid; gap: 6px; }
+.mission-form label > span { color: #688c99; font: 700 9px 'Inter', sans-serif; letter-spacing: 1.2px; text-transform: uppercase; }
+.mission-form input,
+.mission-form select {
+  width: 100%;
+  min-height: 39px;
+  padding: 8px 10px;
+  color: #dff8ff;
+  border-color: rgba(76, 206, 245, .22);
+  border-radius: 0;
+  background: rgba(5, 14, 21, .84);
+  font-size: 12px;
+}
+.mission-form input:focus,
+.mission-form select:focus { border-color: var(--system-blue); box-shadow: 0 0 0 2px rgba(69, 216, 255, .08); }
+.mission-form select option { color: #e9faff; background: #09151e; }
+.mission-form-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.mission-cancel { color: #7897a2; border: 1px solid rgba(102, 157, 176, .22); background: transparent; }
+.mission-cancel:hover { color: #dff7fc; border-color: rgba(102, 208, 239, .42); }
+.mission-error { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin: 0; color: #ff918d; font-size: 11px; }
 .system-quest-list { display: grid; margin-top: 13px; }
 .system-quest {
   width: 100%;
   min-height: 61px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 10px 2px;
   color: #cde7ef;
   border-bottom: 1px solid rgba(74, 202, 240, .11);
@@ -1130,16 +1184,29 @@ textarea { min-height: 112px; }
   text-align: left;
 }
 .system-quest:hover { color: #fff; background: linear-gradient(90deg, rgba(45, 151, 198, .09), transparent); }
+.quest-toggle {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
 .quest-check { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid #386070; color: #071017; }
 .system-quest.complete .quest-check { border-color: var(--system-blue); background: var(--system-blue); box-shadow: 0 0 14px rgba(69, 216, 255, .24); }
-.system-quest > span:nth-child(2) { min-width: 0; display: grid; }
+.quest-toggle > span:nth-child(2) { min-width: 0; display: grid; }
 .system-quest strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .system-quest small { color: #577580; font-size: 10px; }
 .system-quest i { color: #62d7ec; font: 700 10px 'Inter', sans-serif; font-style: normal; }
 .system-quest.complete strong { color: #68818a; text-decoration: line-through; }
+.mission-delete { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; color: #466773; background: transparent; }
+.mission-delete:hover { color: #ff837d; background: rgba(215, 74, 69, .09); }
 .system-empty { min-height: 170px; display: grid; place-content: center; justify-items: center; gap: 9px; color: #5f7c88; font-size: 12px; }
+.system-empty strong { color: #94b8c3; font-size: 13px; }
 .system-link { display: flex; align-items: center; gap: 7px; margin-top: 15px; padding: 7px 0; color: var(--system-blue); background: transparent; font: 700 12px 'Inter', sans-serif; }
-.system-link svg:last-child { margin-left: auto; }
 
 .attribute-list { display: grid; gap: 8px; margin-top: 22px; }
 .attribute-row { min-height: 54px; display: grid; grid-template-columns: auto 1fr 40px; align-items: center; gap: 13px; padding: 7px 9px; border: 1px solid transparent; }
@@ -1168,6 +1235,8 @@ textarea { min-height: 112px; }
   .system-page::before { left: 232px; }
   .system-summary-grid, .system-detail-grid { grid-template-columns: 1fr; }
   .daily-quest-panel { order: -1; }
+  .mission-form { grid-template-columns: minmax(180px, 1fr) 110px 130px; }
+  .mission-form label:nth-of-type(4) { grid-column: 3; }
 }
 
 @media (max-width: 800px) {
@@ -1190,6 +1259,12 @@ textarea { min-height: 112px; }
   .rank-core span, .rank-core small { font-size: 8px; }
   .system-panel { padding: 22px 18px; }
   .system-panel-head h2 { font-size: 23px; }
+  .daily-quest-panel .system-panel-head { align-items: flex-end; }
+  .quest-head-actions { flex-direction: column-reverse; align-items: flex-end; }
+  .mission-add-button { min-height: 31px; padding-inline: 9px; font-size: 9px; }
+  .mission-form { grid-template-columns: 1fr 1fr; padding: 13px; }
+  .mission-title-field { grid-column: 1 / -1; }
+  .mission-form label:nth-of-type(4) { grid-column: auto; }
   .level-readout { flex-wrap: wrap; }
   .level-readout i { width: 100%; margin-left: 0; }
   .system-metrics { gap: 6px; }

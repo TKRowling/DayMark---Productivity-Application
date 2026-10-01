@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from database import Base, engine, get_db
-from models import Meal, Requirement, Scholarship, Task, WeightEntry, Workout
+from models import Meal, Mission, Requirement, Scholarship, Task, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema
 
 
@@ -27,8 +27,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Daymark API",
-    description="Persistence API for tasks, scholarships, weight tracking, workouts, and meals.",
-    version="1.0.0",
+    description="Persistence API for missions, tasks, scholarships, weight tracking, workouts, and meals.",
+    version="1.1.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -70,6 +70,7 @@ def seed_dashboard() -> DashboardSchema:
                 {"id": new_id(), "title": "Upper body workout", "time": "6:30 PM", "category": "Fitness", "date": today, "completed": False},
                 {"id": new_id(), "title": "Plan tomorrow’s priorities", "time": "9:00 PM", "category": "Personal", "date": today, "completed": False},
             ],
+            "missions": [],
             "scholarship": {
                 "name": "Global Future Leaders Scholarship",
                 "provider": "Bright Horizons Foundation",
@@ -112,6 +113,7 @@ def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> 
     db.execute(delete(Requirement).where(Requirement.workspace_id == workspace))
     db.execute(delete(Scholarship).where(Scholarship.workspace_id == workspace))
     db.execute(delete(Task).where(Task.workspace_id == workspace))
+    db.execute(delete(Mission).where(Mission.workspace_id == workspace))
     db.execute(delete(WeightEntry).where(WeightEntry.workspace_id == workspace))
     db.execute(delete(Workout).where(Workout.workspace_id == workspace))
     db.execute(delete(Meal).where(Meal.workspace_id == workspace))
@@ -136,6 +138,7 @@ def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> 
     ]
     db.add(scholarship)
     db.add_all([Task(workspace_id=workspace, **item.model_dump()) for item in payload.tasks])
+    db.add_all([Mission(workspace_id=workspace, **item.model_dump()) for item in payload.missions])
     db.add_all([WeightEntry(workspace_id=workspace, **item.model_dump()) for item in payload.weights])
     db.add_all([Workout(workspace_id=workspace, **item.model_dump()) for item in payload.workouts])
     db.add_all([Meal(workspace_id=workspace, **item.model_dump()) for item in payload.meals])
@@ -152,6 +155,7 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
         return None
 
     tasks = db.scalars(select(Task).where(Task.workspace_id == workspace).order_by(Task.date, Task.time)).all()
+    missions = db.scalars(select(Mission).where(Mission.workspace_id == workspace).order_by(Mission.date, Mission.time)).all()
     weights = db.scalars(select(WeightEntry).where(WeightEntry.workspace_id == workspace).order_by(WeightEntry.date)).all()
     workouts = db.scalars(select(Workout).where(Workout.workspace_id == workspace).order_by(Workout.day, Workout.time)).all()
     meals = db.scalars(select(Meal).where(Meal.workspace_id == workspace).order_by(Meal.type, Meal.title)).all()
@@ -159,6 +163,7 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
     return DashboardSchema.model_validate(
         {
             "tasks": [{"id": item.id, "title": item.title, "time": item.time, "category": item.category, "date": item.date, "completed": item.completed} for item in tasks],
+            "missions": [{"id": item.id, "title": item.title, "date": item.date, "time": item.time, "category": item.category, "xp": item.xp, "completed": item.completed} for item in missions],
             "scholarship": {
                 "name": scholarship.name,
                 "provider": scholarship.provider,
