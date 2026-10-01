@@ -43,6 +43,8 @@ import {
 const STORAGE_KEY = 'daymark-dashboard-v1'
 const WORKSPACE_KEY = 'daymark-workspace-id'
 const SHARED_WORKSPACE_ID = 'tkrowling-dashboard'
+const NOTIFICATION_READ_KEY = 'daymark-notifications-read-v1'
+const NOTIFICATION_SENT_KEY = 'daymark-notifications-sent-v1'
 
 const localISO = (date = new Date()) => {
   const offset = date.getTimezoneOffset() * 60_000
@@ -231,6 +233,140 @@ const daysUntil = (value) => Math.max(0, Math.ceil((new Date(`${value}T23:59:59`
 
 const categoryClass = (category) => category.toLowerCase().replaceAll(' ', '-')
 
+function dateAtTime(date, time) {
+  const match = String(time).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+  if (!match) return new Date(`${date}T00:00:00`)
+  let hours = Number(match[1])
+  const minutes = Number(match[2])
+  const period = match[3]?.toUpperCase()
+  if (period === 'PM' && hours !== 12) hours += 12
+  if (period === 'AM' && hours === 12) hours = 0
+  const result = new Date(`${date}T00:00:00`)
+  result.setHours(hours, minutes, 0, 0)
+  return result
+}
+
+function buildNotificationItems(data) {
+  const now = new Date()
+  const today = localISO(now)
+  const taskHorizon = now.getTime() + (7 * 86_400_000)
+  const tasks = (data.tasks ?? [])
+    .filter((task) => !task.completed)
+    .map((task) => ({ task, startsAt: dateAtTime(task.date, task.time) }))
+    .filter(({ startsAt }) => startsAt.getTime() >= now.getTime() && startsAt.getTime() <= taskHorizon)
+    .map(({ task, startsAt }) => ({
+      id: `task-${task.id}-${task.date}`,
+      kind: 'task',
+      title: task.title,
+      text: `${task.date === today ? 'Today' : formatDate(task.date, { weekday: 'short' })} · ${task.time}${task.end_time ? ` – ${task.end_time}` : ''}`,
+      when: startsAt.getTime(),
+    }))
+
+  const scholarships = (data.scholarships ?? [])
+    .map((scholarship) => {
+      const deadline = new Date(`${scholarship.deadline}T23:59:59`)
+      const remaining = Math.ceil((deadline - now) / 86_400_000)
+      return { scholarship, deadline, remaining }
+    })
+    .filter(({ remaining }) => remaining >= 0 && remaining <= 30)
+    .map(({ scholarship, deadline, remaining }) => ({
+      id: `scholarship-${scholarship.id}-${scholarship.deadline}`,
+      kind: 'scholarship',
+      title: scholarship.name,
+      text: remaining === 0 ? 'Deadline is today' : `${remaining} day${remaining === 1 ? '' : 's'} until deadline`,
+      when: deadline.getTime(),
+    }))
+
+  const openMissions = (data.missions ?? []).filter((mission) => mission.date === today && !mission.completed)
+  const missions = openMissions.length ? [{
+    id: `missions-${today}`,
+    kind: 'mission',
+    title: 'Daily missions remaining',
+    text: `${openMissions.length} mission${openMissions.length === 1 ? '' : 's'} still waiting to be cleared`,
+    when: new Date(`${today}T23:59:59`).getTime(),
+  }] : []
+
+  return [...tasks, ...scholarships, ...missions].sort((a, b) => a.when - b.when)
+}
+
+async function showBrowserNotification(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  if ('serviceWorker' in navigator) {
+    const registration = await navigator.serviceWorker.ready
+    await registration.showNotification(title, { body, tag, renotify: false, data: { url: window.location.origin } })
+    return
+  }
+  new Notification(title, { body, tag })
+}
+
+function useNotificationCenter(data) {
+  const [permission, setPermission] = useState(() => 'Notification' in window ? Notification.permission : 'unsupported')
+  const [clock, setClock] = useState(() => Date.now())
+  const [readIds, setReadIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(NOTIFICATION_READ_KEY) || '[]') } catch { return [] }
+  })
+  const items = useMemo(() => buildNotificationItems(data), [data, clock])
+  const unreadCount = items.filter((item) => !readIds.includes(item.id)).length
+
+  useEffect(() => {
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/notification-sw.js').catch(() => undefined)
+    const clockTimer = window.setInterval(() => setClock(Date.now()), 60_000)
+    return () => window.clearInterval(clockTimer)
+  }, [])
+
+  useEffect(() => {
+    if (permission !== 'granted') return undefined
+    const checkReminders = () => {
+      let sent
+      try { sent = JSON.parse(localStorage.getItem(NOTIFICATION_SENT_KEY) || '[]') } catch { sent = [] }
+      const sentSet = new Set(sent)
+      const now = new Date()
+      const reminders = []
+
+      for (const task of data.tasks ?? []) {
+        if (task.completed) continue
+        const startsAt = dateAtTime(task.date, task.time)
+        const minutes = Math.round((startsAt - now) / 60_000)
+        if (minutes >= 0 && minutes <= 15) reminders.push({ key: `task-${task.id}-${task.date}`, title: `Upcoming: ${task.title}`, body: minutes <= 1 ? `Starts now · ${task.category}` : `Starts in ${minutes} minutes · ${task.category}` })
+      }
+      for (const scholarship of data.scholarships ?? []) {
+        const remaining = Math.ceil((new Date(`${scholarship.deadline}T23:59:59`) - now) / 86_400_000)
+        if ([7, 3, 1, 0].includes(remaining)) reminders.push({ key: `deadline-${scholarship.id}-${remaining}`, title: scholarship.name, body: remaining === 0 ? 'The application deadline is today.' : `${remaining} day${remaining === 1 ? '' : 's'} until the application deadline.` })
+      }
+      const openMissions = (data.missions ?? []).filter((mission) => mission.date === localISO(now) && !mission.completed)
+      if (now.getHours() >= 18 && openMissions.length) reminders.push({ key: `missions-${localISO(now)}`, title: 'Daily missions incomplete', body: `${openMissions.length} mission${openMissions.length === 1 ? '' : 's'} remain today.` })
+
+      for (const reminder of reminders) {
+        if (sentSet.has(reminder.key)) continue
+        sentSet.add(reminder.key)
+        void showBrowserNotification(reminder.title, reminder.body, reminder.key)
+      }
+      localStorage.setItem(NOTIFICATION_SENT_KEY, JSON.stringify([...sentSet].slice(-200)))
+    }
+    checkReminders()
+    const timer = window.setInterval(checkReminders, 60_000)
+    return () => window.clearInterval(timer)
+  }, [data, permission])
+
+  const enable = async () => {
+    if (!('Notification' in window)) return
+    try {
+      const result = await Notification.requestPermission()
+      setPermission(result)
+      if (result === 'granted') void showBrowserNotification('Daymark notifications enabled', 'Activity and scholarship reminders are now active.', 'daymark-enabled')
+    } catch {
+      setPermission('unsupported')
+    }
+  }
+  const markAllRead = () => {
+    const next = [...new Set([...readIds, ...items.map((item) => item.id)])]
+    setReadIds(next)
+    localStorage.setItem(NOTIFICATION_READ_KEY, JSON.stringify(next.slice(-300)))
+  }
+
+  return { items, unreadCount, permission, enable, markAllRead, isUnread: (id) => !readIds.includes(id) }
+}
+
 function Sidebar({ page, setPage, open, setOpen, scholarshipCount }) {
   const nav = [
     { id: 'system', label: 'Ascension system', icon: Swords },
@@ -293,25 +429,51 @@ function Sidebar({ page, setPage, open, setOpen, scholarshipCount }) {
   )
 }
 
-function Topbar({ title, onMenu, apiStatus, onRetry }) {
+function Topbar({ title, onMenu, apiStatus, onRetry, data }) {
   const [searchOpen, setSearchOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const notifications = useNotificationCenter(data)
   const prettyDate = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
   return (
-    <header className="topbar">
-      <button className="mobile-menu icon-button" onClick={onMenu} aria-label="Open menu"><Menu size={20} /></button>
-      <div className="topbar-heading"><span>{title}</span><small>{prettyDate}</small></div>
-      <div className="topbar-actions">
-        <button className={`sync-status ${apiStatus}`} onClick={apiStatus === 'offline' ? onRetry : undefined} title={apiStatus === 'offline' ? 'Backend unavailable — click to retry' : 'FastAPI sync status'}>
-          {apiStatus === 'offline' ? <CloudOff size={15} /> : apiStatus === 'connecting' || apiStatus === 'saving' ? <RefreshCw size={15} /> : <Cloud size={15} />}
-          <span>{apiStatus === 'offline' ? 'Local mode' : apiStatus === 'saving' ? 'Saving' : apiStatus === 'connecting' ? 'Connecting' : 'Synced'}</span>
-        </button>
-        <div className={`search ${searchOpen ? 'expanded' : ''}`}>
-          <Search size={18} />
-          <input placeholder="Search your goals..." aria-label="Search" onFocus={() => setSearchOpen(true)} onBlur={() => setSearchOpen(false)} />
+    <>
+      <header className="topbar">
+        <button className="mobile-menu icon-button" onClick={onMenu} aria-label="Open menu"><Menu size={20} /></button>
+        <div className="topbar-heading"><span>{title}</span><small>{prettyDate}</small></div>
+        <div className="topbar-actions">
+          <button className={`sync-status ${apiStatus}`} onClick={apiStatus === 'offline' ? onRetry : undefined} title={apiStatus === 'offline' ? 'Backend unavailable — click to retry' : 'FastAPI sync status'}>
+            {apiStatus === 'offline' ? <CloudOff size={15} /> : apiStatus === 'connecting' || apiStatus === 'saving' ? <RefreshCw size={15} /> : <Cloud size={15} />}
+            <span>{apiStatus === 'offline' ? 'Local mode' : apiStatus === 'saving' ? 'Saving' : apiStatus === 'connecting' ? 'Connecting' : 'Synced'}</span>
+          </button>
+          <div className={`search ${searchOpen ? 'expanded' : ''}`}>
+            <Search size={18} />
+            <input placeholder="Search your goals..." aria-label="Search" onFocus={() => setSearchOpen(true)} onBlur={() => setSearchOpen(false)} />
+          </div>
+          <button className="icon-button notification" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen}>
+            <Bell size={19} />
+            {notifications.unreadCount > 0 && <span className="notification-count">{Math.min(notifications.unreadCount, 9)}{notifications.unreadCount > 9 ? '+' : ''}</span>}
+          </button>
         </div>
-        <button className="icon-button notification" aria-label="Notifications"><Bell size={19} /><i /></button>
-      </div>
-    </header>
+      </header>
+      {notificationsOpen && <>
+        <button className="notification-shade" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications" />
+        <aside className="notification-panel" aria-label="Notification center">
+          <div className="notification-panel-head"><div><span>REMINDERS</span><h2>Notifications</h2></div><button onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><X size={19} /></button></div>
+          <div className={`notification-permission ${notifications.permission}`}>
+            <span>{notifications.permission === 'granted' ? <CheckCircle2 size={18} /> : <Bell size={18} />}</span>
+            <div><strong>{notifications.permission === 'granted' ? 'Browser alerts are on' : notifications.permission === 'denied' ? 'Browser alerts are blocked' : notifications.permission === 'unsupported' ? 'Browser alerts unavailable' : 'Enable browser alerts'}</strong><p>{notifications.permission === 'granted' ? 'We will remind you about activities and deadlines.' : notifications.permission === 'denied' ? 'Allow notifications in your browser site settings.' : notifications.permission === 'unsupported' ? 'Your browser does not support native notifications.' : 'Receive reminders even when this panel is closed.'}</p></div>
+            {notifications.permission === 'default' && <button onClick={notifications.enable}>Enable</button>}
+          </div>
+          <div className="notification-list-head"><span>UPCOMING</span>{notifications.unreadCount > 0 && <button onClick={notifications.markAllRead}>Mark all read</button>}</div>
+          <div className="notification-list">
+            {notifications.items.length ? notifications.items.map((item) => {
+              const Icon = item.kind === 'scholarship' ? Award : item.kind === 'mission' ? Swords : Clock3
+              const unread = notifications.isUnread(item.id)
+              return <div className={`notification-item ${unread ? 'unread' : ''}`} key={item.id}><span className={`notification-kind ${item.kind}`}><Icon size={17} /></span><div><strong>{item.title}</strong><p>{item.text}</p></div>{unread && <i />}</div>
+            }) : <div className="notification-empty"><CheckCircle2 size={25} /><strong>You&apos;re all caught up</strong><p>No upcoming reminders in the next few days.</p></div>}
+          </div>
+        </aside>
+      </>}
+    </>
   )
 }
 
@@ -957,7 +1119,7 @@ function App() {
     <div className="app-shell">
       <Sidebar page={page} setPage={setPage} open={menuOpen} setOpen={setMenuOpen} scholarshipCount={(data.scholarships ?? []).length} />
       <main className="main-area">
-        <Topbar title={titles[page]} onMenu={() => setMenuOpen(true)} apiStatus={apiStatus} onRetry={retryApi} />
+        <Topbar title={titles[page]} onMenu={() => setMenuOpen(true)} apiStatus={apiStatus} onRetry={retryApi} data={data} />
         <div className="page-content">
           {page === 'system' && <SystemPage data={data} setData={setData} />}
           {page === 'daily' && <TaskPage data={data} setData={setData} />}
