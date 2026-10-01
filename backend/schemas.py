@@ -21,6 +21,7 @@ class MissionSchema(BaseModel):
     category: str = Field(min_length=1, max_length=50)
     xp: int = Field(default=25, ge=5, le=500)
     completed: bool = False
+    completion_dates: list[date] = Field(default_factory=list, max_length=3660)
 
 
 class RequirementSchema(BaseModel):

@@ -86,6 +86,48 @@ def _migrate_legacy_scholarships(connection) -> None:
             )
 
 
+def _migrate_mission_completions(connection) -> None:
+    """Preserve XP from missions completed before daily history was introduced."""
+    tables = set(inspect(connection).get_table_names())
+    if not {"missions", "mission_completions"}.issubset(tables):
+        return
+
+    completed_missions = connection.execute(
+        text("SELECT id, workspace_id, date FROM missions WHERE completed = :completed"),
+        {"completed": True},
+    ).mappings().all()
+    for mission in completed_missions:
+        exists = connection.execute(
+            text(
+                """
+                SELECT 1 FROM mission_completions
+                WHERE mission_id = :mission_id AND completed_on = :completed_on
+                LIMIT 1
+                """
+            ),
+            {"mission_id": mission["id"], "completed_on": mission["date"]},
+        ).first()
+        if exists:
+            continue
+        completion_id = str(uuid5(NAMESPACE_URL, f"daymark-mission:{mission['id']}:{mission['date']}"))
+        connection.execute(
+            text(
+                """
+                INSERT INTO mission_completions
+                    (id, mission_id, workspace_id, completed_on)
+                VALUES
+                    (:id, :mission_id, :workspace_id, :completed_on)
+                """
+            ),
+            {
+                "id": completion_id,
+                "mission_id": mission["id"],
+                "workspace_id": mission["workspace_id"],
+                "completed_on": mission["date"],
+            },
+        )
+
+
 def run_schema_migrations(runtime_engine: Engine) -> None:
     """Apply small, additive schema migrations required by deployed models."""
     direct_url = os.getenv("DATABASE_URL_UNPOOLED") or os.getenv("POSTGRES_URL_NON_POOLING")
@@ -108,6 +150,7 @@ def run_schema_migrations(runtime_engine: Engine) -> None:
                     )
 
             _migrate_legacy_scholarships(connection)
+            _migrate_mission_completions(connection)
     finally:
         if migration_engine is not runtime_engine:
             migration_engine.dispose()

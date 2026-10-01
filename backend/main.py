@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import Base, engine, get_db
 from migrations import run_schema_migrations
-from models import Meal, Mission, ScholarshipEntry, ScholarshipRequirement, Task, WeightEntry, Workout
+from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema
 
 
@@ -30,7 +30,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Daymark API",
     description="Persistence API for missions, tasks, scholarships, weight tracking, workouts, and meals.",
-    version="1.2.0",
+    version="1.3.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -118,6 +118,7 @@ def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> 
     db.execute(delete(ScholarshipRequirement).where(ScholarshipRequirement.workspace_id == workspace))
     db.execute(delete(ScholarshipEntry).where(ScholarshipEntry.workspace_id == workspace))
     db.execute(delete(Task).where(Task.workspace_id == workspace))
+    db.execute(delete(MissionCompletion).where(MissionCompletion.workspace_id == workspace))
     db.execute(delete(Mission).where(Mission.workspace_id == workspace))
     db.execute(delete(WeightEntry).where(WeightEntry.workspace_id == workspace))
     db.execute(delete(Workout).where(Workout.workspace_id == workspace))
@@ -154,7 +155,29 @@ def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> 
         ]
         db.add(scholarship)
     db.add_all([Task(workspace_id=workspace, **item.model_dump()) for item in payload.tasks])
-    db.add_all([Mission(workspace_id=workspace, **item.model_dump()) for item in payload.missions])
+    for item in payload.missions:
+        completion_dates = list(dict.fromkeys(item.completion_dates))
+        if "completion_dates" not in item.model_fields_set and item.completed:
+            completion_dates = [item.date]
+        mission = Mission(
+            id=item.id,
+            workspace_id=workspace,
+            title=item.title,
+            date=item.date,
+            category=item.category,
+            xp=item.xp,
+            completed=item.completed,
+        )
+        mission.completions = [
+            MissionCompletion(
+                id=new_id(),
+                mission_id=item.id,
+                workspace_id=workspace,
+                completed_on=completed_on,
+            )
+            for completed_on in completion_dates
+        ]
+        db.add(mission)
     db.add_all([WeightEntry(workspace_id=workspace, **item.model_dump()) for item in payload.weights])
     db.add_all([Workout(workspace_id=workspace, **item.model_dump()) for item in payload.workouts])
     db.add_all([Meal(workspace_id=workspace, **item.model_dump()) for item in payload.meals])
@@ -169,7 +192,12 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
         .order_by(ScholarshipEntry.deadline, ScholarshipEntry.name)
     ).all()
     tasks = db.scalars(select(Task).where(Task.workspace_id == workspace).order_by(Task.date, Task.time)).all()
-    missions = db.scalars(select(Mission).where(Mission.workspace_id == workspace).order_by(Mission.date, Mission.id)).all()
+    missions = db.scalars(
+        select(Mission)
+        .options(selectinload(Mission.completions))
+        .where(Mission.workspace_id == workspace)
+        .order_by(Mission.date, Mission.id)
+    ).all()
     weights = db.scalars(select(WeightEntry).where(WeightEntry.workspace_id == workspace).order_by(WeightEntry.date)).all()
     workouts = db.scalars(select(Workout).where(Workout.workspace_id == workspace).order_by(Workout.day, Workout.time)).all()
     meals = db.scalars(select(Meal).where(Meal.workspace_id == workspace).order_by(Meal.type, Meal.title)).all()
@@ -193,7 +221,18 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
     return DashboardSchema.model_validate(
         {
             "tasks": [{"id": item.id, "title": item.title, "time": item.time, "end_time": item.end_time, "category": item.category, "date": item.date, "completed": item.completed} for item in tasks],
-            "missions": [{"id": item.id, "title": item.title, "date": item.date, "category": item.category, "xp": item.xp, "completed": item.completed} for item in missions],
+            "missions": [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "date": item.date,
+                    "category": item.category,
+                    "xp": item.xp,
+                    "completed": date.today() in {completion.completed_on for completion in item.completions},
+                    "completion_dates": [completion.completed_on for completion in item.completions],
+                }
+                for item in missions
+            ],
             "scholarships": scholarship_data,
             "scholarship": scholarship_data[0] if scholarship_data else None,
             "weights": [{"id": item.id, "date": item.date, "value": item.value} for item in weights],

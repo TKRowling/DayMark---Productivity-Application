@@ -32,6 +32,26 @@ class Mission(Base):
     category: Mapped[str] = mapped_column(String(50))
     xp: Mapped[int] = mapped_column(Integer, default=25)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    completions: Mapped[list["MissionCompletion"]] = relationship(
+        back_populates="mission",
+        cascade="all, delete-orphan",
+        order_by="MissionCompletion.completed_on",
+    )
+
+
+class MissionCompletion(Base):
+    __tablename__ = "mission_completions"
+    __table_args__ = (UniqueConstraint("mission_id", "completed_on", name="uq_mission_completion_date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    mission_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("missions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    completed_on: Mapped[date] = mapped_column(Date)
+    mission: Mapped[Mission] = relationship(back_populates="completions")
 
 
 class Scholarship(Base):

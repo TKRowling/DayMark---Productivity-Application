@@ -232,6 +232,8 @@ const formatDate = (value, options = {}) =>
 const daysUntil = (value) => Math.max(0, Math.ceil((new Date(`${value}T23:59:59`) - new Date()) / 86_400_000))
 
 const categoryClass = (category) => category.toLowerCase().replaceAll(' ', '-')
+const missionCompletionDates = (mission) => mission.completion_dates ?? (mission.completed ? [mission.date] : [])
+const missionDoneOn = (mission, date) => missionCompletionDates(mission).includes(date)
 
 function dateAtTime(date, time) {
   const match = String(time).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
@@ -277,7 +279,7 @@ function buildNotificationItems(data) {
       when: deadline.getTime(),
     }))
 
-  const openMissions = (data.missions ?? []).filter((mission) => mission.date === today && !mission.completed)
+  const openMissions = (data.missions ?? []).filter((mission) => mission.date <= today && !missionDoneOn(mission, today))
   const missions = openMissions.length ? [{
     id: `missions-${today}`,
     kind: 'mission',
@@ -333,7 +335,8 @@ function useNotificationCenter(data) {
         const remaining = Math.ceil((new Date(`${scholarship.deadline}T23:59:59`) - now) / 86_400_000)
         if ([7, 3, 1, 0].includes(remaining)) reminders.push({ key: `deadline-${scholarship.id}-${remaining}`, title: scholarship.name, body: remaining === 0 ? 'The application deadline is today.' : `${remaining} day${remaining === 1 ? '' : 's'} until the application deadline.` })
       }
-      const openMissions = (data.missions ?? []).filter((mission) => mission.date === localISO(now) && !mission.completed)
+      const notificationDate = localISO(now)
+      const openMissions = (data.missions ?? []).filter((mission) => mission.date <= notificationDate && !missionDoneOn(mission, notificationDate))
       if (now.getHours() >= 18 && openMissions.length) reminders.push({ key: `missions-${localISO(now)}`, title: 'Daily missions incomplete', body: `${openMissions.length} mission${openMissions.length === 1 ? '' : 's'} remain today.` })
 
       for (const reminder of reminders) {
@@ -497,30 +500,34 @@ function SystemPage({ data, setData }) {
   const [missionError, setMissionError] = useState('')
   const missionInputRef = useRef(null)
   const missions = data.missions ?? []
-  const completedMissions = missions.filter((mission) => mission.completed)
+  const today = localISO()
+  const missionClearCount = missions.reduce((total, mission) => total + missionCompletionDates(mission).length, 0)
   const completedRequirements = (data.scholarships ?? []).flatMap((scholarship) => scholarship.requirements).filter((item) => item.done)
   const completedWorkouts = data.workouts.filter((item) => item.done)
   const weightLogs = Math.max(0, data.weights.length - 1)
-  const missionXp = completedMissions.reduce((total, mission) => total + (Number(mission.xp) || 25), 0)
+  const missionXp = missions.reduce((total, mission) => total + (missionCompletionDates(mission).length * (Number(mission.xp) || 25)), 0)
   const totalXp = missionXp + (completedRequirements.length * 40) + (completedWorkouts.length * 50) + (weightLogs * 15)
   const xpPerLevel = 150
   const level = Math.floor(totalXp / xpPerLevel) + 1
   const currentXp = totalXp % xpPerLevel
   const xpProgress = Math.round((currentXp / xpPerLevel) * 100)
   const rank = level >= 25 ? 'S' : level >= 18 ? 'A' : level >= 12 ? 'B' : level >= 7 ? 'C' : level >= 4 ? 'D' : 'E'
-  const todayMissions = missions.filter((mission) => mission.date === localISO())
-  const todayDone = todayMissions.filter((mission) => mission.completed).length
+  const todayMissions = missions.filter((mission) => mission.date <= today)
+  const todayDone = todayMissions.filter((mission) => missionDoneOn(mission, today)).length
   const dailyProgress = todayMissions.length ? Math.round((todayDone / todayMissions.length) * 100) : 0
-  const trainingDone = completedMissions.filter((mission) => mission.category === 'Training').length
-  const learningDone = completedMissions.filter((mission) => mission.category === 'Learning').length
-  const wellnessDone = completedMissions.filter((mission) => mission.category === 'Wellness').length
-  const disciplineDone = completedMissions.filter((mission) => ['Discipline', 'Challenge'].includes(mission.category)).length
+  const clearsFor = (categories) => missions
+    .filter((mission) => categories.includes(mission.category))
+    .reduce((total, mission) => total + missionCompletionDates(mission).length, 0)
+  const trainingDone = clearsFor(['Training'])
+  const learningDone = clearsFor(['Learning'])
+  const wellnessDone = clearsFor(['Wellness'])
+  const disciplineDone = clearsFor(['Discipline', 'Challenge'])
   const stats = [
     { label: 'Strength', value: 10 + (trainingDone * 2) + (completedWorkouts.length * 3), icon: Swords },
     { label: 'Vitality', value: 10 + wellnessDone + (weightLogs * 2), icon: Shield },
     { label: 'Focus', value: 10 + (learningDone * 3) + completedRequirements.length, icon: Brain },
-    { label: 'Discipline', value: 10 + (disciplineDone * 3) + completedMissions.length, icon: Target },
-    { label: 'Momentum', value: 10 + completedMissions.length + todayDone, icon: Zap },
+    { label: 'Discipline', value: 10 + (disciplineDone * 3) + missionClearCount, icon: Target },
+    { label: 'Momentum', value: 10 + missionClearCount + todayDone, icon: Zap },
   ].map((stat) => ({ ...stat, value: Math.min(stat.value, 99) }))
 
   const openMissionForm = () => {
@@ -542,6 +549,7 @@ function SystemPage({ data, setData }) {
       date: localISO(),
       xp: Number(missionForm.xp) || 25,
       completed: false,
+      completion_dates: [],
     }
     setData((current) => ({ ...current, missions: [...(current.missions ?? []), mission] }))
     setMissionForm((current) => ({ ...current, title: '' }))
@@ -550,7 +558,16 @@ function SystemPage({ data, setData }) {
   }
   const toggleMission = (id) => setData((current) => ({
     ...current,
-    missions: (current.missions ?? []).map((mission) => mission.id === id ? { ...mission, completed: !mission.completed } : mission),
+    missions: (current.missions ?? []).map((mission) => {
+      if (mission.id !== id) return mission
+      const completionDates = missionCompletionDates(mission)
+      const completeToday = completionDates.includes(today)
+      return {
+        ...mission,
+        completed: !completeToday,
+        completion_dates: completeToday ? completionDates.filter((date) => date !== today) : [...completionDates, today],
+      }
+    }),
   }))
   const deleteMission = (id) => setData((current) => ({
     ...current,
@@ -587,7 +604,7 @@ function SystemPage({ data, setData }) {
           <div className="system-progress"><i style={{ width: `${xpProgress}%` }} /></div>
           <div className="system-progress-meta"><span>{xpProgress}% to next level</span><strong>{xpPerLevel - currentXp} XP REQUIRED</strong></div>
           <div className="system-metrics">
-            <div><span>MISSIONS CLEARED</span><strong>{completedMissions.length}</strong></div>
+            <div><span>DAILY CLEARS</span><strong>{missionClearCount}</strong></div>
             <div><span>TRAINING DONE</span><strong>{completedWorkouts.length}</strong></div>
             <div><span>MILESTONES</span><strong>{completedRequirements.length}</strong></div>
           </div>
@@ -606,22 +623,25 @@ function SystemPage({ data, setData }) {
               <label className="mission-title-field"><span>Mission</span><input ref={missionInputRef} value={missionForm.title} onChange={(event) => { setMissionForm({ ...missionForm, title: event.target.value }); setMissionError('') }} placeholder="e.g. Complete 100 push-ups" aria-invalid={Boolean(missionError)} /></label>
               <label><span>Type</span><select value={missionForm.category} onChange={(event) => setMissionForm({ ...missionForm, category: event.target.value })}><option>Training</option><option>Learning</option><option>Discipline</option><option>Wellness</option><option>Challenge</option></select></label>
               <label><span>Reward</span><select value={missionForm.xp} onChange={(event) => setMissionForm({ ...missionForm, xp: Number(event.target.value) })}><option value={15}>15 XP</option><option value={25}>25 XP</option><option value={50}>50 XP</option><option value={100}>100 XP</option></select></label>
+              <p className="mission-repeat-note"><RefreshCw size={14} /> Repeats every day. Each daily completion earns this XP again.</p>
               <div className="mission-form-actions"><button className="mission-submit" type="submit"><Plus size={15} /> Assign</button><button className="mission-cancel" type="button" onClick={() => { setMissionFormOpen(false); setMissionError('') }}>Cancel</button></div>
               {missionError && <p className="mission-error"><AlertCircle size={14} /> {missionError}</p>}
             </form>
           )}
           <div className="system-progress compact"><i style={{ width: `${dailyProgress}%` }} /></div>
           <div className="system-quest-list">
-            {todayMissions.length ? todayMissions.map((mission) => (
-              <div className={`system-quest ${mission.completed ? 'complete' : ''}`} key={mission.id}>
-                <button className="quest-toggle" onClick={() => toggleMission(mission.id)} aria-label={mission.completed ? `Mark ${mission.title} incomplete` : `Complete ${mission.title}`}>
-                  <span className="quest-check">{mission.completed ? <Check size={14} strokeWidth={3} /> : null}</span>
-                  <span><strong>{mission.title}</strong><small>{mission.category}</small></span>
+            {todayMissions.length ? todayMissions.map((mission) => {
+              const completeToday = missionDoneOn(mission, today)
+              const totalClears = missionCompletionDates(mission).length
+              return <div className={`system-quest ${completeToday ? 'complete' : ''}`} key={mission.id}>
+                <button className="quest-toggle" onClick={() => toggleMission(mission.id)} aria-label={completeToday ? `Mark ${mission.title} incomplete today` : `Complete ${mission.title} today`}>
+                  <span className="quest-check">{completeToday ? <Check size={14} strokeWidth={3} /> : null}</span>
+                  <span><strong>{mission.title}</strong><small>DAILY · {mission.category} · {totalClears} clear{totalClears === 1 ? '' : 's'}</small></span>
                 </button>
                 <i>+{mission.xp} XP</i>
                 <button className="mission-delete" onClick={() => deleteMission(mission.id)} aria-label={`Delete ${mission.title}`}><Trash2 size={15} /></button>
               </div>
-            )) : <div className="system-empty"><Target size={24} /><strong>No missions assigned today.</strong><span>Add a daily mission to begin earning XP.</span></div>}
+            }) : <div className="system-empty"><Target size={24} /><strong>No recurring missions yet.</strong><span>Add a daily mission to begin earning XP.</span></div>}
           </div>
           {!missionFormOpen && <button className="system-link" onClick={openMissionForm}><Plus size={16} /> Add another daily mission</button>}
         </div>
@@ -645,7 +665,7 @@ function SystemPage({ data, setData }) {
           <div className="system-panel-head"><div><span className="system-code">SYSTEM LOG</span><h2>Recent signals</h2></div><Zap size={20} /></div>
           <div className="system-feed">
             <div className="feed-item priority"><span><Trophy size={17} /></span><div><strong>Current directive</strong><p>{nextMilestone}</p></div></div>
-            <div className="feed-item"><span><CheckCircle2 size={17} /></span><div><strong>Experience synchronized</strong><p>{completedMissions.length} completed missions converted into progression.</p></div></div>
+            <div className="feed-item"><span><CheckCircle2 size={17} /></span><div><strong>Experience synchronized</strong><p>{missionClearCount} daily mission clears converted into lifetime progression.</p></div></div>
             <div className="feed-item"><span><Brain size={17} /></span><div><strong>Focus analysis</strong><p>{learningDone ? `${learningDone} learning missions reinforced your Focus attribute.` : 'Complete a Learning mission to increase Focus.'}</p></div></div>
             <div className="feed-item"><span><Shield size={17} /></span><div><strong>Persistence active</strong><p>Your progress is secured to the shared TKRowling workspace.</p></div></div>
           </div>
