@@ -7,6 +7,7 @@ class TaskSchema(BaseModel):
     id: str = Field(min_length=1, max_length=36)
     title: str = Field(min_length=1, max_length=240)
     time: str = Field(max_length=20)
+    end_time: str = Field(default="", max_length=20)
     category: str = Field(min_length=1, max_length=50)
     date: date
     completed: bool = False
@@ -16,7 +17,6 @@ class MissionSchema(BaseModel):
     id: str = Field(min_length=1, max_length=36)
     title: str = Field(min_length=1, max_length=240)
     date: date
-    time: str = Field(max_length=20)
     category: str = Field(min_length=1, max_length=50)
     xp: int = Field(default=25, ge=5, le=500)
     completed: bool = False

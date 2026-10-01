@@ -57,11 +57,11 @@ const addDays = (amount) => {
 
 const seedData = () => ({
   tasks: [
-    { id: crypto.randomUUID(), title: '30-minute morning walk', time: '7:30 AM', category: 'Wellness', date: localISO(), completed: true },
-    { id: crypto.randomUUID(), title: 'Review scholarship essay', time: '10:00 AM', category: 'Scholarship', date: localISO(), completed: false },
-    { id: crypto.randomUUID(), title: 'Complete reading assignment', time: '2:00 PM', category: 'Study', date: localISO(), completed: false },
-    { id: crypto.randomUUID(), title: 'Upper body workout', time: '6:30 PM', category: 'Fitness', date: localISO(), completed: false },
-    { id: crypto.randomUUID(), title: 'Plan tomorrow’s priorities', time: '9:00 PM', category: 'Personal', date: localISO(), completed: false },
+    { id: crypto.randomUUID(), title: '30-minute morning walk', time: '7:30 AM', end_time: '8:00 AM', category: 'Wellness', date: localISO(), completed: true },
+    { id: crypto.randomUUID(), title: 'Review scholarship essay', time: '10:00 AM', end_time: '11:00 AM', category: 'Scholarship', date: localISO(), completed: false },
+    { id: crypto.randomUUID(), title: 'Complete reading assignment', time: '2:00 PM', end_time: '3:00 PM', category: 'Study', date: localISO(), completed: false },
+    { id: crypto.randomUUID(), title: 'Upper body workout', time: '6:30 PM', end_time: '7:30 PM', category: 'Fitness', date: localISO(), completed: false },
+    { id: crypto.randomUUID(), title: 'Plan tomorrow’s priorities', time: '9:00 PM', end_time: '9:30 PM', category: 'Personal', date: localISO(), completed: false },
   ],
   missions: [],
   scholarship: {
@@ -309,7 +309,7 @@ function TaskRow({ task, onToggle, onDelete, detailed = false }) {
       <button className="task-check" onClick={() => onToggle(task.id)} aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}>
         {task.completed ? <Check size={14} strokeWidth={3} /> : null}
       </button>
-      <div className="task-time">{task.time}</div>
+      <div className="task-time">{task.time}{task.end_time ? <><span>–</span>{task.end_time}</> : null}</div>
       <div className="task-copy"><strong>{task.title}</strong>{detailed && <small>{formatDate(task.date, { weekday: 'short' })}</small>}</div>
       <span className={`category-tag ${categoryClass(task.category)}`}>{task.category}</span>
       {onDelete && <button className="row-delete" onClick={() => onDelete(task.id)} aria-label="Delete task"><Trash2 size={16} /></button>}
@@ -319,7 +319,7 @@ function TaskRow({ task, onToggle, onDelete, detailed = false }) {
 
 function SystemPage({ data, setData }) {
   const [missionFormOpen, setMissionFormOpen] = useState(false)
-  const [missionForm, setMissionForm] = useState({ title: '', time: '09:00', category: 'Training', xp: 25 })
+  const [missionForm, setMissionForm] = useState({ title: '', category: 'Training', xp: 25 })
   const [missionError, setMissionError] = useState('')
   const missionInputRef = useRef(null)
   const missions = data.missions ?? []
@@ -361,13 +361,11 @@ function SystemPage({ data, setData }) {
       missionInputRef.current?.focus()
       return
     }
-    const time = new Date(`2000-01-01T${missionForm.time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     const mission = {
       ...missionForm,
       id: crypto.randomUUID(),
       title: missionForm.title.trim(),
       date: localISO(),
-      time,
       xp: Number(missionForm.xp) || 25,
       completed: false,
     }
@@ -432,7 +430,6 @@ function SystemPage({ data, setData }) {
           {missionFormOpen && (
             <form className="mission-form" onSubmit={addMission}>
               <label className="mission-title-field"><span>Mission</span><input ref={missionInputRef} value={missionForm.title} onChange={(event) => { setMissionForm({ ...missionForm, title: event.target.value }); setMissionError('') }} placeholder="e.g. Complete 100 push-ups" aria-invalid={Boolean(missionError)} /></label>
-              <label><span>Time</span><input type="time" value={missionForm.time} onChange={(event) => setMissionForm({ ...missionForm, time: event.target.value })} /></label>
               <label><span>Type</span><select value={missionForm.category} onChange={(event) => setMissionForm({ ...missionForm, category: event.target.value })}><option>Training</option><option>Learning</option><option>Discipline</option><option>Wellness</option><option>Challenge</option></select></label>
               <label><span>Reward</span><select value={missionForm.xp} onChange={(event) => setMissionForm({ ...missionForm, xp: Number(event.target.value) })}><option value={15}>15 XP</option><option value={25}>25 XP</option><option value={50}>50 XP</option><option value={100}>100 XP</option></select></label>
               <div className="mission-form-actions"><button className="mission-submit" type="submit"><Plus size={15} /> Assign</button><button className="mission-cancel" type="button" onClick={() => { setMissionFormOpen(false); setMissionError('') }}>Cancel</button></div>
@@ -445,7 +442,7 @@ function SystemPage({ data, setData }) {
               <div className={`system-quest ${mission.completed ? 'complete' : ''}`} key={mission.id}>
                 <button className="quest-toggle" onClick={() => toggleMission(mission.id)} aria-label={mission.completed ? `Mark ${mission.title} incomplete` : `Complete ${mission.title}`}>
                   <span className="quest-check">{mission.completed ? <Check size={14} strokeWidth={3} /> : null}</span>
-                  <span><strong>{mission.title}</strong><small>{mission.time} · {mission.category}</small></span>
+                  <span><strong>{mission.title}</strong><small>{mission.category}</small></span>
                 </button>
                 <i>+{mission.xp} XP</i>
                 <button className="mission-delete" onClick={() => deleteMission(mission.id)} aria-label={`Delete ${mission.title}`}><Trash2 size={15} /></button>
@@ -487,7 +484,7 @@ function SystemPage({ data, setData }) {
 function TaskPage({ data, setData }) {
   const [filter, setFilter] = useState('All')
   const [dayFilter, setDayFilter] = useState('all')
-  const [form, setForm] = useState({ title: '', time: '09:00', category: 'Personal', date: localISO() })
+  const [form, setForm] = useState({ title: '', time: '09:00', end_time: '10:00', category: 'Personal', date: localISO() })
   const [formMessage, setFormMessage] = useState(null)
   const taskInputRef = useRef(null)
   const categories = ['All', 'Personal', 'Study', 'Scholarship', 'Fitness', 'Wellness']
@@ -499,12 +496,17 @@ function TaskPage({ data, setData }) {
       taskInputRef.current?.focus()
       return
     }
-    if (!form.date || !form.time) {
-      setFormMessage({ type: 'error', text: 'Choose both a date and a time for this task.' })
+    if (!form.date || !form.time || !form.end_time) {
+      setFormMessage({ type: 'error', text: 'Choose a date, start time, and ending time for this task.' })
+      return
+    }
+    if (form.end_time <= form.time) {
+      setFormMessage({ type: 'error', text: 'The ending time must be later than the start time.' })
       return
     }
     const time = new Date(`2000-01-01T${form.time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    setData((current) => ({ ...current, tasks: [...current.tasks, { ...form, title: form.title.trim(), time, id: crypto.randomUUID(), completed: false }] }))
+    const end_time = new Date(`2000-01-01T${form.end_time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    setData((current) => ({ ...current, tasks: [...current.tasks, { ...form, title: form.title.trim(), time, end_time, id: crypto.randomUUID(), completed: false }] }))
     setFilter('All')
     setDayFilter(form.date)
     setFormMessage({ type: 'success', text: `“${form.title.trim()}” was added to your plan.` })
@@ -549,7 +551,8 @@ function TaskPage({ data, setData }) {
         <form className="task-form" onSubmit={addTask}>
           <label className="wide-input"><span>Task name <i>Required</i></span><input ref={taskInputRef} value={form.title} onChange={(e) => { setForm({ ...form, title: e.target.value }); if (formMessage?.type === 'error') setFormMessage(null) }} placeholder="e.g. Finish scholarship essay" autoFocus aria-invalid={formMessage?.type === 'error'} /></label>
           <label><span>Date</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label><span>Time</span><input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></label>
+          <label><span>Start time</span><input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></label>
+          <label><span>Ending time</span><input type="time" value={form.end_time} min={form.time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} /></label>
           <label><span>Category</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{categories.slice(1).map((category) => <option key={category}>{category}</option>)}</select></label>
           <button className="primary-button" type="submit"><Plus size={17} /> Add task</button>
         </form>

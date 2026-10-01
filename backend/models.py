@@ -13,6 +13,7 @@ class Task(Base):
     workspace_id: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(240))
     time: Mapped[str] = mapped_column(String(20))
+    end_time: Mapped[str] = mapped_column(String(20), default="", server_default="")
     category: Mapped[str] = mapped_column(String(50))
     date: Mapped[date] = mapped_column(Date)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -25,7 +26,9 @@ class Mission(Base):
     workspace_id: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(240))
     date: Mapped[date] = mapped_column(Date)
-    time: Mapped[str] = mapped_column(String(20))
+    # Kept internally for compatibility with the first missions table version.
+    # The mission API no longer exposes or requires a time.
+    time: Mapped[str] = mapped_column(String(20), default="")
     category: Mapped[str] = mapped_column(String(50))
     xp: Mapped[int] = mapped_column(Integer, default=25)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)

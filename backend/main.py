@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from database import Base, engine, get_db
+from migrations import run_schema_migrations
 from models import Meal, Mission, Requirement, Scholarship, Task, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema
 
@@ -22,6 +23,7 @@ WORKSPACE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 async def lifespan(_: FastAPI):
     if engine is not None:
         Base.metadata.create_all(bind=engine)
+        run_schema_migrations(engine)
     yield
 
 
@@ -64,11 +66,11 @@ def seed_dashboard() -> DashboardSchema:
     return DashboardSchema.model_validate(
         {
             "tasks": [
-                {"id": new_id(), "title": "30-minute morning walk", "time": "7:30 AM", "category": "Wellness", "date": today, "completed": True},
-                {"id": new_id(), "title": "Review scholarship essay", "time": "10:00 AM", "category": "Scholarship", "date": today, "completed": False},
-                {"id": new_id(), "title": "Complete reading assignment", "time": "2:00 PM", "category": "Study", "date": today, "completed": False},
-                {"id": new_id(), "title": "Upper body workout", "time": "6:30 PM", "category": "Fitness", "date": today, "completed": False},
-                {"id": new_id(), "title": "Plan tomorrow’s priorities", "time": "9:00 PM", "category": "Personal", "date": today, "completed": False},
+                {"id": new_id(), "title": "30-minute morning walk", "time": "7:30 AM", "end_time": "8:00 AM", "category": "Wellness", "date": today, "completed": True},
+                {"id": new_id(), "title": "Review scholarship essay", "time": "10:00 AM", "end_time": "11:00 AM", "category": "Scholarship", "date": today, "completed": False},
+                {"id": new_id(), "title": "Complete reading assignment", "time": "2:00 PM", "end_time": "3:00 PM", "category": "Study", "date": today, "completed": False},
+                {"id": new_id(), "title": "Upper body workout", "time": "6:30 PM", "end_time": "7:30 PM", "category": "Fitness", "date": today, "completed": False},
+                {"id": new_id(), "title": "Plan tomorrow’s priorities", "time": "9:00 PM", "end_time": "9:30 PM", "category": "Personal", "date": today, "completed": False},
             ],
             "missions": [],
             "scholarship": {
@@ -155,15 +157,15 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
         return None
 
     tasks = db.scalars(select(Task).where(Task.workspace_id == workspace).order_by(Task.date, Task.time)).all()
-    missions = db.scalars(select(Mission).where(Mission.workspace_id == workspace).order_by(Mission.date, Mission.time)).all()
+    missions = db.scalars(select(Mission).where(Mission.workspace_id == workspace).order_by(Mission.date, Mission.id)).all()
     weights = db.scalars(select(WeightEntry).where(WeightEntry.workspace_id == workspace).order_by(WeightEntry.date)).all()
     workouts = db.scalars(select(Workout).where(Workout.workspace_id == workspace).order_by(Workout.day, Workout.time)).all()
     meals = db.scalars(select(Meal).where(Meal.workspace_id == workspace).order_by(Meal.type, Meal.title)).all()
 
     return DashboardSchema.model_validate(
         {
-            "tasks": [{"id": item.id, "title": item.title, "time": item.time, "category": item.category, "date": item.date, "completed": item.completed} for item in tasks],
-            "missions": [{"id": item.id, "title": item.title, "date": item.date, "time": item.time, "category": item.category, "xp": item.xp, "completed": item.completed} for item in missions],
+            "tasks": [{"id": item.id, "title": item.title, "time": item.time, "end_time": item.end_time, "category": item.category, "date": item.date, "completed": item.completed} for item in tasks],
+            "missions": [{"id": item.id, "title": item.title, "date": item.date, "category": item.category, "xp": item.xp, "completed": item.completed} for item in missions],
             "scholarship": {
                 "name": scholarship.name,
                 "provider": scholarship.provider,
