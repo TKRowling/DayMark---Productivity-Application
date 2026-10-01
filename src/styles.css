@@ -909,7 +909,7 @@ textarea { min-height: 112px; }
 .system-hero {
   position: relative;
   isolation: isolate;
-  min-height: 470px;
+  min-height: 540px;
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, .78fr);
@@ -1025,12 +1025,12 @@ textarea { min-height: 112px; }
   min-width: 0;
   justify-self: end;
   display: grid;
-  grid-template-rows: minmax(310px, 1fr) auto auto;
+  grid-template-rows: minmax(360px, 1fr) auto auto;
   align-self: stretch;
 }
 .character-art {
   position: relative;
-  min-height: 310px;
+  min-height: 360px;
   isolation: isolate;
 }
 .character-art::before {
@@ -1061,10 +1061,11 @@ textarea { min-height: 112px; }
 .character-art img {
   position: absolute;
   z-index: 1;
+  top: 8px;
   left: 50%;
-  bottom: -30px;
+  bottom: auto;
   width: auto;
-  height: 430px;
+  height: calc(100% - 8px);
   max-width: none;
   object-fit: contain;
   filter: drop-shadow(0 0 28px rgba(90, 79, 255, .32));
@@ -1354,7 +1355,7 @@ textarea { min-height: 112px; }
   .daily-quest-panel { order: -1; }
   .mission-form { grid-template-columns: minmax(180px, 1fr) 140px 100px; }
   .system-hero { grid-template-columns: minmax(0, 1fr) 340px; padding-inline: 38px; }
-  .character-art img { height: 405px; }
+  .character-art img { height: calc(100% - 8px); }
 }
 
 @media (max-width: 800px) {
@@ -1362,7 +1363,9 @@ textarea { min-height: 112px; }
   .system-hero { min-height: 440px; grid-template-columns: minmax(0, 1fr) 285px; gap: 18px; padding: 30px; }
   .system-hero h1 { font-size: clamp(47px, 10vw, 66px); }
   .system-hero-copy > p:nth-of-type(2) { font-size: 14px; }
-  .character-art img { height: 370px; }
+  .character-evolution { grid-template-rows: minmax(290px, 1fr) auto auto; }
+  .character-art { min-height: 290px; }
+  .character-art img { height: calc(100% - 8px); }
   .character-rank-seal { top: 38px; width: 70px; height: 70px; }
   .character-rank-seal strong { font-size: 34px; }
   .character-form-meta > div:nth-child(2) { align-items: flex-start; flex-direction: column; gap: 1px; }
@@ -1380,7 +1383,7 @@ textarea { min-height: 112px; }
   .system-identity { gap: 6px; font-size: 9px; }
   .character-evolution { width: 100%; height: 360px; grid-template-rows: 270px auto auto; margin-top: 9px; }
   .character-art { min-height: 270px; }
-  .character-art img { bottom: -24px; height: 340px; }
+  .character-art img { top: 4px; bottom: auto; height: calc(100% - 4px); }
   .character-art::before { width: 230px; height: 230px; }
   .character-rank-seal { top: 24px; right: 2px; }
   .character-form-meta { padding: 9px 10px 8px; }
