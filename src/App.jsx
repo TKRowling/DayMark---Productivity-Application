@@ -7,6 +7,7 @@ import {
   Award,
   Beef,
   Bell,
+  Brain,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -30,13 +31,17 @@ import {
   RefreshCw,
   Scale,
   Search,
+  Shield,
   Sparkles,
+  Star,
+  Swords,
   Target,
   Trash2,
   TrendingDown,
   Trophy,
   Utensils,
   X,
+  Zap,
 } from 'lucide-react'
 
 const STORAGE_KEY = 'daymark-dashboard-v1'
@@ -220,6 +225,7 @@ const categoryClass = (category) => category.toLowerCase().replaceAll(' ', '-')
 function Sidebar({ page, setPage, open, setOpen }) {
   const nav = [
     { id: 'overview', label: 'Overview', icon: Home },
+    { id: 'system', label: 'Ascension system', icon: Swords },
     { id: 'daily', label: 'Daily activities', icon: LayoutList },
     { id: 'scholarship', label: 'Scholarship', icon: Award },
     { id: 'weight', label: 'Weight loss', icon: Scale },
@@ -243,7 +249,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
         <div className="sidebar-block">
           <p className="sidebar-label">Workspace</p>
           <nav>
-            {nav.slice(0, 1).map(({ id, label, icon: Icon }) => (
+            {nav.slice(0, 2).map(({ id, label, icon: Icon }) => (
               <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => navigate(id)}>
                 <Icon size={19} /> <span>{label}</span>
               </button>
@@ -254,7 +260,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
         <div className="sidebar-block goals-block">
           <p className="sidebar-label">My goals</p>
           <nav>
-            {nav.slice(1).map(({ id, label, icon: Icon }) => (
+            {nav.slice(2).map(({ id, label, icon: Icon }) => (
               <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} onClick={() => navigate(id)}>
                 <Icon size={19} /> <span>{label}</span>
                 {id === 'scholarship' && <span className="nav-badge">2</span>}
@@ -385,6 +391,118 @@ function TaskRow({ task, onToggle, onDelete, detailed = false }) {
       <div className="task-copy"><strong>{task.title}</strong>{detailed && <small>{formatDate(task.date, { weekday: 'short' })}</small>}</div>
       <span className={`category-tag ${categoryClass(task.category)}`}>{task.category}</span>
       {onDelete && <button className="row-delete" onClick={() => onDelete(task.id)} aria-label="Delete task"><Trash2 size={16} /></button>}
+    </div>
+  )
+}
+
+function SystemPage({ data, setData, setPage }) {
+  const completedTasks = data.tasks.filter((task) => task.completed)
+  const completedRequirements = data.scholarship.requirements.filter((item) => item.done)
+  const completedWorkouts = data.workouts.filter((item) => item.done)
+  const weightLogs = Math.max(0, data.weights.length - 1)
+  const totalXp = (completedTasks.length * 25) + (completedRequirements.length * 40) + (completedWorkouts.length * 50) + (weightLogs * 15)
+  const xpPerLevel = 150
+  const level = Math.floor(totalXp / xpPerLevel) + 1
+  const currentXp = totalXp % xpPerLevel
+  const xpProgress = Math.round((currentXp / xpPerLevel) * 100)
+  const rank = level >= 25 ? 'S' : level >= 18 ? 'A' : level >= 12 ? 'B' : level >= 7 ? 'C' : level >= 4 ? 'D' : 'E'
+  const todayTasks = data.tasks.filter((task) => task.date === localISO())
+  const todayDone = todayTasks.filter((task) => task.completed).length
+  const dailyProgress = todayTasks.length ? Math.round((todayDone / todayTasks.length) * 100) : 0
+  const fitnessDone = completedTasks.filter((task) => ['Fitness', 'Wellness'].includes(task.category)).length
+  const focusDone = completedTasks.filter((task) => ['Study', 'Scholarship'].includes(task.category)).length
+  const personalDone = completedTasks.filter((task) => task.category === 'Personal').length
+  const stats = [
+    { label: 'Strength', value: 10 + (fitnessDone * 2) + (completedWorkouts.length * 3), icon: Swords },
+    { label: 'Vitality', value: 10 + fitnessDone + (weightLogs * 2), icon: Shield },
+    { label: 'Focus', value: 10 + (focusDone * 3) + completedRequirements.length, icon: Brain },
+    { label: 'Discipline', value: 10 + completedTasks.length + (completedWorkouts.length * 2), icon: Target },
+    { label: 'Momentum', value: 10 + (personalDone * 2) + todayDone, icon: Zap },
+  ].map((stat) => ({ ...stat, value: Math.min(stat.value, 99) }))
+  const toggleTask = (id) => setData((current) => ({
+    ...current,
+    tasks: current.tasks.map((task) => task.id === id ? { ...task, completed: !task.completed } : task),
+  }))
+  const nextMilestone = todayTasks.length && todayDone === todayTasks.length
+    ? 'Daily objective cleared. Recovery protocol available.'
+    : `${Math.max(todayTasks.length - todayDone, 0)} daily objective${todayTasks.length - todayDone === 1 ? '' : 's'} remain.`
+
+  return (
+    <div className="page-stack inner-page system-page">
+      <section className="system-hero">
+        <div className="system-hero-grid" aria-hidden="true" />
+        <div className="system-hero-copy">
+          <p className="system-status"><span /> SYSTEM ONLINE</p>
+          <h1>Ascension Protocol</h1>
+          <p>Turn every real-world objective into progress. Complete quests, earn experience, and build your attributes one day at a time.</p>
+          <div className="system-identity"><Shield size={17} /><span>PLAYER</span><strong>TKROWLING</strong><i>ACTIVE</i></div>
+        </div>
+        <div className="rank-core">
+          <span>RANK</span>
+          <strong>{rank}</strong>
+          <small>LEVEL {level}</small>
+        </div>
+      </section>
+
+      <section className="system-summary-grid">
+        <div className="system-panel level-panel">
+          <div className="system-panel-head">
+            <div><span className="system-code">PLAYER STATUS</span><h2>Level progression</h2></div>
+            <span className="level-token"><Star size={16} /> LV. {level}</span>
+          </div>
+          <div className="level-readout"><strong>{currentXp}</strong><span>/ {xpPerLevel} XP</span><i>{totalXp.toLocaleString()} lifetime XP</i></div>
+          <div className="system-progress"><i style={{ width: `${xpProgress}%` }} /></div>
+          <div className="system-progress-meta"><span>{xpProgress}% to next level</span><strong>{xpPerLevel - currentXp} XP REQUIRED</strong></div>
+          <div className="system-metrics">
+            <div><span>QUESTS CLEARED</span><strong>{completedTasks.length}</strong></div>
+            <div><span>TRAINING DONE</span><strong>{completedWorkouts.length}</strong></div>
+            <div><span>MILESTONES</span><strong>{completedRequirements.length}</strong></div>
+          </div>
+        </div>
+
+        <div className="system-panel daily-quest-panel">
+          <div className="system-panel-head">
+            <div><span className="system-code">DAILY QUEST</span><h2>Today&apos;s objectives</h2></div>
+            <span className={`quest-state ${dailyProgress === 100 ? 'cleared' : ''}`}>{dailyProgress === 100 ? 'CLEARED' : `${dailyProgress}%`}</span>
+          </div>
+          <div className="system-progress compact"><i style={{ width: `${dailyProgress}%` }} /></div>
+          <div className="system-quest-list">
+            {todayTasks.length ? todayTasks.slice(0, 5).map((task) => (
+              <button className={`system-quest ${task.completed ? 'complete' : ''}`} key={task.id} onClick={() => toggleTask(task.id)}>
+                <span className="quest-check">{task.completed ? <Check size={14} strokeWidth={3} /> : null}</span>
+                <span><strong>{task.title}</strong><small>{task.time} · {task.category}</small></span>
+                <i>+25 XP</i>
+              </button>
+            )) : <div className="system-empty"><Target size={24} /><span>No quests assigned today.</span></div>}
+          </div>
+          <button className="system-link" onClick={() => setPage('daily')}><Plus size={16} /> Manage daily quests <ArrowRight size={16} /></button>
+        </div>
+      </section>
+
+      <section className="system-detail-grid">
+        <div className="system-panel attribute-panel">
+          <div className="system-panel-head"><div><span className="system-code">ATTRIBUTES</span><h2>Player statistics</h2></div><span className="unspent-points">0 POINTS AVAILABLE</span></div>
+          <div className="attribute-list">
+            {stats.map(({ label, value, icon: Icon }) => (
+              <div className="attribute-row" key={label}>
+                <span className="attribute-icon"><Icon size={18} /></span>
+                <div><span>{label}</span><div className="attribute-bar"><i style={{ width: `${value}%` }} /></div></div>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="system-panel system-feed-panel">
+          <div className="system-panel-head"><div><span className="system-code">SYSTEM LOG</span><h2>Recent signals</h2></div><Zap size={20} /></div>
+          <div className="system-feed">
+            <div className="feed-item priority"><span><Trophy size={17} /></span><div><strong>Current directive</strong><p>{nextMilestone}</p></div></div>
+            <div className="feed-item"><span><CheckCircle2 size={17} /></span><div><strong>Experience synchronized</strong><p>{completedTasks.length} completed activities converted into progression.</p></div></div>
+            <div className="feed-item"><span><Brain size={17} /></span><div><strong>Focus analysis</strong><p>{focusDone ? `${focusDone} study objectives reinforced your Focus attribute.` : 'Complete a Study quest to increase Focus.'}</p></div></div>
+            <div className="feed-item"><span><Shield size={17} /></span><div><strong>Persistence active</strong><p>Your progress is secured to the shared TKRowling workspace.</p></div></div>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -778,7 +896,7 @@ function App() {
   const [page, setPage] = useState('overview')
   const [menuOpen, setMenuOpen] = useState(false)
   const [data, setData, apiStatus, retryApi] = useDashboardData()
-  const titles = { overview: 'Overview', daily: 'Daily activities', scholarship: 'Scholarship', weight: 'Weight loss', wellness: 'Gym & meals' }
+  const titles = { overview: 'Overview', system: 'Ascension system', daily: 'Daily activities', scholarship: 'Scholarship', weight: 'Weight loss', wellness: 'Gym & meals' }
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -791,6 +909,7 @@ function App() {
         <Topbar title={titles[page]} onMenu={() => setMenuOpen(true)} apiStatus={apiStatus} onRetry={retryApi} />
         <div className="page-content">
           {page === 'overview' && <Overview data={data} setData={setData} setPage={setPage} />}
+          {page === 'system' && <SystemPage data={data} setData={setData} setPage={setPage} />}
           {page === 'daily' && <TaskPage data={data} setData={setData} />}
           {page === 'scholarship' && <ScholarshipPage data={data} setData={setData} />}
           {page === 'weight' && <WeightPage data={data} setData={setData} />}
