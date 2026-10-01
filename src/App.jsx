@@ -46,6 +46,16 @@ const SHARED_WORKSPACE_ID = 'tkrowling-dashboard'
 const NOTIFICATION_READ_KEY = 'daymark-notifications-read-v1'
 const NOTIFICATION_SENT_KEY = 'daymark-notifications-sent-v1'
 
+const RANK_ORDER = ['E', 'D', 'C', 'B', 'A', 'S']
+const RANK_FORMS = {
+  E: { minLevel: 1, title: 'Awakened Recruit', asset: '/characters/shadow-hunter-rank-e.png' },
+  D: { minLevel: 4, title: 'Shadow Initiate', asset: '/characters/shadow-hunter-rank-d.png' },
+  C: { minLevel: 7, title: 'Night Vanguard', asset: '/characters/shadow-hunter-rank-c.png' },
+  B: { minLevel: 12, title: 'Abyss Knight', asset: '/characters/shadow-hunter-rank-b.png' },
+  A: { minLevel: 18, title: 'Shadow Commander', asset: '/characters/shadow-hunter-rank-a.png' },
+  S: { minLevel: 25, title: 'Eclipse Sovereign', asset: '/characters/shadow-hunter-rank-s.png' },
+}
+
 const localISO = (date = new Date()) => {
   const offset = date.getTimezoneOffset() * 60_000
   return new Date(date.getTime() - offset).toISOString().slice(0, 10)
@@ -512,6 +522,13 @@ function SystemPage({ data, setData }) {
   const currentXp = totalXp % xpPerLevel
   const xpProgress = Math.round((currentXp / xpPerLevel) * 100)
   const rank = level >= 25 ? 'S' : level >= 18 ? 'A' : level >= 12 ? 'B' : level >= 7 ? 'C' : level >= 4 ? 'D' : 'E'
+  const rankIndex = RANK_ORDER.indexOf(rank)
+  const currentForm = RANK_FORMS[rank]
+  const nextRank = RANK_ORDER[rankIndex + 1]
+  const nextForm = nextRank ? RANK_FORMS[nextRank] : null
+  const evolutionProgress = nextForm
+    ? Math.round(((level - currentForm.minLevel) / (nextForm.minLevel - currentForm.minLevel)) * 100)
+    : 100
   const todayMissions = missions.filter((mission) => mission.date <= today)
   const todayDone = todayMissions.filter((mission) => missionDoneOn(mission, today)).length
   const dailyProgress = todayMissions.length ? Math.round((todayDone / todayMissions.length) * 100) : 0
@@ -587,10 +604,24 @@ function SystemPage({ data, setData }) {
           <p>Turn every real-world objective into progress. Complete quests, earn experience, and build your attributes one day at a time.</p>
           <div className="system-identity"><Shield size={17} /><span>PLAYER</span><strong>TKROWLING</strong><i>ACTIVE</i></div>
         </div>
-        <div className="rank-core">
-          <span>RANK</span>
-          <strong>{rank}</strong>
-          <small>LEVEL {level}</small>
+        <div className={`character-evolution rank-${rank.toLowerCase()}`}>
+          <div className="character-art" aria-label={`${currentForm.title}, Rank ${rank}`}>
+            <span className="character-scanline" aria-hidden="true" />
+            <img key={rank} src={currentForm.asset} alt={`${currentForm.title} character form`} />
+            <div className="character-rank-seal"><span>RANK</span><strong>{rank}</strong><small>LV. {level}</small></div>
+          </div>
+          <div className="character-form-meta">
+            <span>SELECTED EVOLUTION · SHADOW HUNTER</span>
+            <div><strong>{currentForm.title}</strong><small>{nextForm ? `Next form: Rank ${nextRank} at level ${nextForm.minLevel}` : 'Final evolution awakened'}</small></div>
+            <div className="evolution-progress"><i style={{ width: `${evolutionProgress}%` }} /></div>
+          </div>
+          <div className="rank-ladder" aria-label="Rank evolution path">
+            {RANK_ORDER.map((rankName, index) => (
+              <span className={`${index < rankIndex ? 'unlocked' : ''} ${rankName === rank ? 'current' : ''}`} key={rankName} title={`${RANK_FORMS[rankName].title} · Level ${RANK_FORMS[rankName].minLevel}`}>
+                <i>{rankName}</i><small>LV {RANK_FORMS[rankName].minLevel}</small>
+              </span>
+            ))}
+          </div>
         </div>
       </section>
 
