@@ -246,9 +246,12 @@ input:focus, select:focus, textarea:focus { border-color: #98aa91; background: w
 .task-day-group .task-list { padding: 0 16px; }
 .task-list.detailed .task-row { min-height: 57px; }
 .task-list.detailed .task-time { width: 126px; }
+.row-copy { flex: none; min-width: 68px; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border: 1px solid #d5dad0; border-radius: 8px; color: var(--green-dark); background: #f3f6ef; font-size: 9px; font-weight: 800; letter-spacing: .35px; text-transform: uppercase; transition: .18s ease; }
+.row-copy:hover { color: white; border-color: var(--green); background: var(--green); box-shadow: 0 6px 16px rgba(78, 96, 73, .18); }
 .row-delete { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: transparent; color: #b6b9b2; opacity: .35; transition: .18s ease; }
 .task-row:hover .row-delete, .requirement-row:hover .row-delete { opacity: 1; }
 .row-delete:hover { color: #c75e4d; background: var(--coral-soft); }
+.task-copy-message { margin: 0 0 15px; }
 .empty-state { min-height: 190px; display: grid; place-content: center; justify-items: center; text-align: center; color: #92968d; }
 .empty-state > span { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; background: #edf0e9; color: var(--green); margin-bottom: 10px; }
 .empty-state strong { font: 700 15px 'Manrope', sans-serif; color: #50554c; }
@@ -615,6 +618,8 @@ select option { color: white; background: #111; }
 .task-day-heading > div strong { color: #f4efe9; font-size: 17px; letter-spacing: .35px; text-transform: uppercase; }
 .task-day-heading > div span { color: #8c8782; }
 .day-completion { color: #ff938d; border: 1px solid rgba(223,52,47,.22); background: rgba(223,52,47,.11); }
+.row-copy { color: #ffaaa5; border-color: rgba(223,52,47,.28); background: rgba(223,52,47,.1); }
+.row-copy:hover { color: white; border-color: #ef4c45; background: #d8322c; box-shadow: 0 7px 18px rgba(223,52,47,.22); }
 .row-delete { color: #5d5955; }
 .row-delete:hover { color: #ff6961; background: rgba(223,52,47,.12); }
 .empty-state { color: #85817d; }
@@ -875,6 +880,8 @@ textarea { min-height: 112px; }
   .task-copy strong { font-size: 16px; }
   .task-copy small { font-size: 11px; }
   .category-tag { padding: 5px 8px; font-size: 11px; }
+  .row-copy { min-width: 32px; width: 32px; padding: 0; }
+  .row-copy span { display: none; }
   .day-tab { min-width: 132px; }
   .task-day-heading { padding-inline: 13px; }
   .task-day-heading > div strong { font-size: 18px; }

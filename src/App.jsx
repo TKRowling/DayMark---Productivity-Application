@@ -15,6 +15,7 @@ import {
   Clock3,
   Cloud,
   CloudOff,
+  Copy,
   Dumbbell,
   Edit3,
   FileText,
@@ -490,7 +491,7 @@ function Topbar({ title, onMenu, apiStatus, onRetry, data }) {
   )
 }
 
-function TaskRow({ task, onToggle, onDelete, detailed = false }) {
+function TaskRow({ task, onToggle, onDelete, onCopy, detailed = false }) {
   return (
     <div className={`task-row ${task.completed ? 'completed' : ''}`}>
       <button className="task-check" onClick={() => onToggle(task.id)} aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}>
@@ -499,6 +500,7 @@ function TaskRow({ task, onToggle, onDelete, detailed = false }) {
       <div className="task-time">{task.time}{task.end_time ? <><span>–</span>{task.end_time}</> : null}</div>
       <div className="task-copy"><strong>{task.title}</strong>{detailed && <small>{formatDate(task.date, { weekday: 'short' })}</small>}</div>
       <span className={`category-tag ${categoryClass(task.category)}`}>{task.category}</span>
+      {onCopy && <button className="row-copy" onClick={() => onCopy(task)} aria-label={`Copy ${task.title} to today`} title="Copy to today"><Copy size={15} /><span>Today</span></button>}
       {onDelete && <button className="row-delete" onClick={() => onDelete(task.id)} aria-label="Delete task"><Trash2 size={16} /></button>}
     </div>
   )
@@ -711,6 +713,7 @@ function TaskPage({ data, setData }) {
   const [dayFilter, setDayFilter] = useState('all')
   const [form, setForm] = useState({ title: '', time: '09:00', end_time: '10:00', category: 'Personal', date: localISO() })
   const [formMessage, setFormMessage] = useState(null)
+  const [copyMessage, setCopyMessage] = useState(null)
   const taskInputRef = useRef(null)
   const categories = ['All', 'Personal', 'Study', 'Scholarship', 'Fitness', 'Wellness']
 
@@ -739,6 +742,27 @@ function TaskPage({ data, setData }) {
   }
   const toggleTask = (id) => setData((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? { ...task, completed: !task.completed } : task) }))
   const deleteTask = (id) => setData((current) => ({ ...current, tasks: current.tasks.filter((task) => task.id !== id) }))
+  const copyTaskToToday = (task) => {
+    const today = localISO()
+    const alreadyScheduled = data.tasks.some((candidate) => (
+      candidate.date === today
+      && candidate.title.trim().toLocaleLowerCase() === task.title.trim().toLocaleLowerCase()
+      && candidate.time === task.time
+      && candidate.end_time === task.end_time
+      && candidate.category === task.category
+    ))
+
+    setFilter('All')
+    setDayFilter(today)
+    if (alreadyScheduled) {
+      setCopyMessage({ type: 'error', text: `“${task.title}” is already scheduled for today.` })
+      return
+    }
+
+    const copiedTask = { ...task, id: crypto.randomUUID(), date: today, completed: false }
+    setData((current) => ({ ...current, tasks: [...current.tasks, copiedTask] }))
+    setCopyMessage({ type: 'success', text: `“${task.title}” was copied to today.` })
+  }
   const taskDays = useMemo(() => [...new Set(data.tasks.map((task) => task.date))].sort(), [data.tasks])
   const visibleTasks = data.tasks
     .filter((task) => (filter === 'All' || task.category === filter) && (dayFilter === 'all' || task.date === dayFilter))
@@ -803,6 +827,7 @@ function TaskPage({ data, setData }) {
             </button>
           })}
         </div>
+        {copyMessage && <div className={`form-message task-copy-message ${copyMessage.type}`} role="status" aria-live="polite">{copyMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}<span>{copyMessage.text}</span></div>}
         {visibleTasks.length ? <div className="task-day-groups">
           {Object.entries(groupedTasks).map(([date, tasks]) => {
             const completedForDay = tasks.filter((task) => task.completed).length
@@ -814,7 +839,7 @@ function TaskPage({ data, setData }) {
                 <span className="day-completion"><CheckCircle2 size={15} /> {completedForDay} of {tasks.length} done</span>
               </header>
               <div className="task-list detailed">
-                {tasks.map((task) => <TaskRow key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} />)}
+                {tasks.map((task) => <TaskRow key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onCopy={task.date < localISO() ? copyTaskToToday : null} />)}
               </div>
             </section>
           })}
