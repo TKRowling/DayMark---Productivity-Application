@@ -128,6 +128,33 @@ def _migrate_mission_completions(connection) -> None:
         )
 
 
+def _migrate_mission_xp_rewards(connection) -> None:
+    """Map legacy mission rewards onto the smaller 1, 3, 5, 10 XP scale."""
+    if "missions" not in set(inspect(connection).get_table_names()):
+        return
+
+    connection.execute(
+        text(
+            """
+            UPDATE missions
+            SET xp = CASE
+                WHEN xp IN (1, 3, 5, 10) THEN xp
+                WHEN xp = 15 THEN 1
+                WHEN xp = 25 THEN 3
+                WHEN xp = 50 THEN 5
+                WHEN xp = 100 THEN 10
+                WHEN xp IS NULL THEN 3
+                WHEN xp < 2 THEN 1
+                WHEN xp < 4 THEN 3
+                WHEN xp < 8 THEN 5
+                ELSE 10
+            END
+            WHERE xp IS NULL OR xp NOT IN (1, 3, 5, 10)
+            """
+        )
+    )
+
+
 def run_schema_migrations(runtime_engine: Engine) -> None:
     """Apply small, additive schema migrations required by deployed models."""
     direct_url = os.getenv("DATABASE_URL_UNPOOLED") or os.getenv("POSTGRES_URL_NON_POOLING")
@@ -151,6 +178,7 @@ def run_schema_migrations(runtime_engine: Engine) -> None:
 
             _migrate_legacy_scholarships(connection)
             _migrate_mission_completions(connection)
+            _migrate_mission_xp_rewards(connection)
     finally:
         if migration_engine is not runtime_engine:
             migration_engine.dispose()

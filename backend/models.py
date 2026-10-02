@@ -30,7 +30,7 @@ class Mission(Base):
     # The mission API no longer exposes or requires a time.
     time: Mapped[str] = mapped_column(String(20), default="")
     category: Mapped[str] = mapped_column(String(50))
-    xp: Mapped[int] = mapped_column(Integer, default=25)
+    xp: Mapped[int] = mapped_column(Integer, default=3)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
     completions: Mapped[list["MissionCompletion"]] = relationship(
         back_populates="mission",

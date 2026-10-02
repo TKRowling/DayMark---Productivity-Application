@@ -46,6 +46,7 @@ const WORKSPACE_KEY = 'daymark-workspace-id'
 const SHARED_WORKSPACE_ID = 'tkrowling-dashboard'
 const NOTIFICATION_READ_KEY = 'daymark-notifications-read-v1'
 const NOTIFICATION_SENT_KEY = 'daymark-notifications-sent-v1'
+const MISSION_XP_VALUES = [1, 3, 5, 10]
 
 const RANK_ORDER = ['E', 'D', 'C', 'B', 'A', 'S']
 const RANK_FORMS = {
@@ -121,7 +122,17 @@ function normalizeDashboard(value) {
     : legacyScholarship
       ? [{ ...legacyScholarship, id: legacyScholarship.id || crypto.randomUUID() }]
       : []
-  return { ...dashboard, scholarships }
+  const legacyMissionXp = { 15: 1, 25: 3, 50: 5, 100: 10 }
+  const missions = (value.missions ?? []).map((mission) => {
+    const reward = Number(mission.xp)
+    const xp = MISSION_XP_VALUES.includes(reward)
+      ? reward
+      : legacyMissionXp[reward] ?? MISSION_XP_VALUES.reduce((nearest, option) => (
+        Math.abs(option - reward) < Math.abs(nearest - reward) ? option : nearest
+      ), 3)
+    return { ...mission, xp }
+  })
+  return { ...dashboard, missions, scholarships }
 }
 
 function getWorkspaceId() {
@@ -508,7 +519,7 @@ function TaskRow({ task, onToggle, onDelete, onCopy, detailed = false }) {
 
 function SystemPage({ data, setData }) {
   const [missionFormOpen, setMissionFormOpen] = useState(false)
-  const [missionForm, setMissionForm] = useState({ title: '', category: 'Training', xp: 25 })
+  const [missionForm, setMissionForm] = useState({ title: '', category: 'Training', xp: 3 })
   const [missionError, setMissionError] = useState('')
   const missionInputRef = useRef(null)
   const missions = data.missions ?? []
@@ -517,7 +528,7 @@ function SystemPage({ data, setData }) {
   const completedRequirements = (data.scholarships ?? []).flatMap((scholarship) => scholarship.requirements).filter((item) => item.done)
   const completedWorkouts = data.workouts.filter((item) => item.done)
   const weightLogs = Math.max(0, data.weights.length - 1)
-  const missionXp = missions.reduce((total, mission) => total + (missionCompletionDates(mission).length * (Number(mission.xp) || 25)), 0)
+  const missionXp = missions.reduce((total, mission) => total + (missionCompletionDates(mission).length * (Number(mission.xp) || 3)), 0)
   const totalXp = missionXp + (completedRequirements.length * 40) + (completedWorkouts.length * 50) + (weightLogs * 15)
   const xpPerLevel = 150
   const level = Math.floor(totalXp / xpPerLevel) + 1
@@ -566,7 +577,7 @@ function SystemPage({ data, setData }) {
       id: crypto.randomUUID(),
       title: missionForm.title.trim(),
       date: localISO(),
-      xp: Number(missionForm.xp) || 25,
+      xp: Number(missionForm.xp) || 3,
       completed: false,
       completion_dates: [],
     }
@@ -655,7 +666,7 @@ function SystemPage({ data, setData }) {
             <form className="mission-form" onSubmit={addMission}>
               <label className="mission-title-field"><span>Mission</span><input ref={missionInputRef} value={missionForm.title} onChange={(event) => { setMissionForm({ ...missionForm, title: event.target.value }); setMissionError('') }} placeholder="e.g. Complete 100 push-ups" aria-invalid={Boolean(missionError)} /></label>
               <label><span>Type</span><select value={missionForm.category} onChange={(event) => setMissionForm({ ...missionForm, category: event.target.value })}><option>Training</option><option>Learning</option><option>Discipline</option><option>Wellness</option><option>Challenge</option></select></label>
-              <label><span>Reward</span><select value={missionForm.xp} onChange={(event) => setMissionForm({ ...missionForm, xp: Number(event.target.value) })}><option value={15}>15 XP</option><option value={25}>25 XP</option><option value={50}>50 XP</option><option value={100}>100 XP</option></select></label>
+              <label><span>Reward</span><select value={missionForm.xp} onChange={(event) => setMissionForm({ ...missionForm, xp: Number(event.target.value) })}>{MISSION_XP_VALUES.map((xp) => <option value={xp} key={xp}>{xp} XP</option>)}</select></label>
               <p className="mission-repeat-note"><RefreshCw size={14} /> Repeats every day. Each daily completion earns this XP again.</p>
               <div className="mission-form-actions"><button className="mission-submit" type="submit"><Plus size={15} /> Assign</button><button className="mission-cancel" type="button" onClick={() => { setMissionFormOpen(false); setMissionError('') }}>Cancel</button></div>
               {missionError && <p className="mission-error"><AlertCircle size={14} /> {missionError}</p>}

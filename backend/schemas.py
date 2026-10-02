@@ -4,6 +4,19 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator
 
 
+MISSION_XP_VALUES = (1, 3, 5, 10)
+LEGACY_MISSION_XP = {15: 1, 25: 3, 50: 5, 100: 10}
+
+
+def normalize_mission_xp(value: int | str) -> int:
+    reward = int(value)
+    if reward in MISSION_XP_VALUES:
+        return reward
+    if reward in LEGACY_MISSION_XP:
+        return LEGACY_MISSION_XP[reward]
+    return min(MISSION_XP_VALUES, key=lambda option: abs(option - reward))
+
+
 class TaskSchema(BaseModel):
     id: str = Field(min_length=1, max_length=36)
     title: str = Field(min_length=1, max_length=240)
@@ -19,9 +32,14 @@ class MissionSchema(BaseModel):
     title: str = Field(min_length=1, max_length=240)
     date: date
     category: str = Field(min_length=1, max_length=50)
-    xp: int = Field(default=25, ge=5, le=500)
+    xp: int = Field(default=3)
     completed: bool = False
     completion_dates: list[date] = Field(default_factory=list, max_length=3660)
+
+    @field_validator("xp", mode="before")
+    @classmethod
+    def use_supported_xp_reward(cls, value: int | str) -> int:
+        return normalize_mission_xp(value)
 
 
 class RequirementSchema(BaseModel):
