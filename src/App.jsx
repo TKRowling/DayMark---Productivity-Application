@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   AlertCircle,
@@ -156,6 +156,43 @@ function useDashboardData() {
   const [retryToken, setRetryToken] = useState(0)
   const isHydrated = useRef(false)
   const workspaceId = useRef(getWorkspaceId())
+  const dataRef = useRef(data)
+  const saveQueue = useRef(Promise.resolve(true))
+  const saveRevision = useRef(0)
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
+
+  const queueSave = useCallback((snapshot) => {
+    const revision = ++saveRevision.current
+    setApiStatus('saving')
+
+    const save = async () => {
+      // A newer snapshot is already waiting, so this queued one can be skipped.
+      if (revision < saveRevision.current) return true
+      try {
+        const response = await fetch('/api/dashboard', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Workspace-ID': workspaceId.current,
+          },
+          body: JSON.stringify(snapshot),
+        })
+        if (!response.ok) throw new Error(`API responded with ${response.status}`)
+        if (revision === saveRevision.current) setApiStatus('synced')
+        return true
+      } catch {
+        if (revision === saveRevision.current) setApiStatus('offline')
+        return false
+      }
+    }
+
+    const pending = saveQueue.current.catch(() => false).then(save)
+    saveQueue.current = pending
+    return pending
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -213,39 +250,29 @@ function useDashboardData() {
 
     if (!isHydrated.current) return undefined
     setApiStatus('saving')
-    const controller = new AbortController()
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await fetch('/api/dashboard', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Workspace-ID': workspaceId.current,
-          },
-          body: JSON.stringify(data),
-          signal: controller.signal,
-        })
-        if (!response.ok) throw new Error(`API responded with ${response.status}`)
-        setApiStatus('synced')
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          isHydrated.current = false
-          setApiStatus('offline')
-        }
-      }
-    }, 550)
+    const timer = window.setTimeout(() => { queueSave(data) }, 550)
 
     return () => {
       window.clearTimeout(timer)
-      controller.abort()
     }
-  }, [data])
+  }, [data, queueSave])
+
+  const saveNow = useCallback(() => {
+    if (!isHydrated.current) {
+      setRetryToken((value) => value + 1)
+      return Promise.resolve(false)
+    }
+    const snapshot = dataRef.current
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+    return queueSave(snapshot)
+  }, [queueSave])
 
   const retry = () => {
-    setRetryToken((value) => value + 1)
+    if (isHydrated.current) saveNow()
+    else setRetryToken((value) => value + 1)
   }
 
-  return [data, setData, apiStatus, retry]
+  return [data, setData, apiStatus, retry, saveNow]
 }
 
 const formatDate = (value, options = {}) =>
@@ -517,10 +544,11 @@ function TaskRow({ task, onToggle, onDelete, onCopy, detailed = false }) {
   )
 }
 
-function SystemPage({ data, setData }) {
+function SystemPage({ data, setData, apiStatus, onSaveProgress }) {
   const [missionFormOpen, setMissionFormOpen] = useState(false)
   const [missionForm, setMissionForm] = useState({ title: '', category: 'Training', xp: 3 })
   const [missionError, setMissionError] = useState('')
+  const [saveMessage, setSaveMessage] = useState(null)
   const missionInputRef = useRef(null)
   const missions = data.missions ?? []
   const today = localISO()
@@ -586,19 +614,22 @@ function SystemPage({ data, setData }) {
     setMissionError('')
     setMissionFormOpen(false)
   }
-  const toggleMission = (id) => setData((current) => ({
-    ...current,
-    missions: (current.missions ?? []).map((mission) => {
-      if (mission.id !== id) return mission
-      const completionDates = missionCompletionDates(mission)
-      const completeToday = completionDates.includes(today)
-      return {
-        ...mission,
-        completed: !completeToday,
-        completion_dates: completeToday ? completionDates.filter((date) => date !== today) : [...completionDates, today],
-      }
-    }),
-  }))
+  const toggleMission = (id) => {
+    setSaveMessage(null)
+    setData((current) => ({
+      ...current,
+      missions: (current.missions ?? []).map((mission) => {
+        if (mission.id !== id) return mission
+        const completionDates = missionCompletionDates(mission)
+        const completeToday = completionDates.includes(today)
+        return {
+          ...mission,
+          completed: !completeToday,
+          completion_dates: completeToday ? completionDates.filter((date) => date !== today) : [...completionDates, today],
+        }
+      }),
+    }))
+  }
   const deleteMission = (id) => setData((current) => ({
     ...current,
     missions: (current.missions ?? []).filter((mission) => mission.id !== id),
@@ -606,6 +637,13 @@ function SystemPage({ data, setData }) {
   const nextMilestone = todayMissions.length && todayDone === todayMissions.length
     ? 'Daily objective cleared. Recovery protocol available.'
     : `${Math.max(todayMissions.length - todayDone, 0)} daily mission${todayMissions.length - todayDone === 1 ? '' : 's'} remain.`
+  const saveMissionProgress = async () => {
+    setSaveMessage(null)
+    const saved = await onSaveProgress()
+    setSaveMessage(saved
+      ? { type: 'success', text: `Saved ${todayDone} completed mission${todayDone === 1 ? '' : 's'} and today’s XP.` }
+      : { type: 'error', text: 'Could not save mission XP. Check your connection and try again.' })
+  }
 
   return (
     <div className="page-stack inner-page system-page">
@@ -687,7 +725,11 @@ function SystemPage({ data, setData }) {
               </div>
             }) : <div className="system-empty"><Target size={24} /><strong>No recurring missions yet.</strong><span>Add a daily mission to begin earning XP.</span></div>}
           </div>
-          {!missionFormOpen && <button className="system-link" onClick={openMissionForm}><Plus size={16} /> Add another daily mission</button>}
+          <div className="mission-footer-actions">
+            {!missionFormOpen && <button className="system-link" onClick={openMissionForm}><Plus size={16} /> Add another daily mission</button>}
+            <button className="mission-save-button" onClick={saveMissionProgress} disabled={apiStatus === 'connecting'}><Cloud size={15} /> {apiStatus === 'saving' ? 'Save now' : 'Save XP progress'}</button>
+          </div>
+          {saveMessage && <p className={`mission-save-message ${saveMessage.type}`} role="status" aria-live="polite">{saveMessage.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}{saveMessage.text}</p>}
         </div>
       </section>
 
@@ -1195,7 +1237,7 @@ function EmptyState({ icon: Icon, title, text }) {
 function App() {
   const [page, setPage] = useState('system')
   const [menuOpen, setMenuOpen] = useState(false)
-  const [data, setData, apiStatus, retryApi] = useDashboardData()
+  const [data, setData, apiStatus, retryApi, saveDashboard] = useDashboardData()
   const titles = { system: 'Ascension system', daily: 'Daily activities', scholarship: 'Scholarship', weight: 'Weight loss', wellness: 'Gym & meals' }
 
   useEffect(() => {
@@ -1208,7 +1250,7 @@ function App() {
       <main className="main-area">
         <Topbar title={titles[page]} onMenu={() => setMenuOpen(true)} apiStatus={apiStatus} onRetry={retryApi} data={data} />
         <div className="page-content">
-          {page === 'system' && <SystemPage data={data} setData={setData} />}
+          {page === 'system' && <SystemPage data={data} setData={setData} apiStatus={apiStatus} onSaveProgress={saveDashboard} />}
           {page === 'daily' && <TaskPage data={data} setData={setData} />}
           {page === 'scholarship' && <ScholarshipPage data={data} setData={setData} />}
           {page === 'weight' && <WeightPage data={data} setData={setData} />}
