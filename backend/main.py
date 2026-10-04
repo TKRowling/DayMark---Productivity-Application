@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import Base, engine, get_db
 from migrations import run_schema_migrations
-from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, WeightEntry, Workout
+from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, TaskSubtask, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema
 
 
@@ -30,7 +30,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Daymark API",
     description="Persistence API for missions, tasks, scholarships, weight tracking, workouts, and meals.",
-    version="1.4.0",
+    version="1.5.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -117,6 +117,7 @@ def seed_dashboard() -> DashboardSchema:
 def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> None:
     db.execute(delete(ScholarshipRequirement).where(ScholarshipRequirement.workspace_id == workspace))
     db.execute(delete(ScholarshipEntry).where(ScholarshipEntry.workspace_id == workspace))
+    db.execute(delete(TaskSubtask).where(TaskSubtask.workspace_id == workspace))
     db.execute(delete(Task).where(Task.workspace_id == workspace))
     db.execute(delete(MissionCompletion).where(MissionCompletion.workspace_id == workspace))
     db.execute(delete(Mission).where(Mission.workspace_id == workspace))
@@ -154,7 +155,29 @@ def replace_dashboard(db: Session, workspace: str, payload: DashboardSchema) -> 
             for index, requirement in enumerate(item.requirements)
         ]
         db.add(scholarship)
-    db.add_all([Task(workspace_id=workspace, **item.model_dump()) for item in payload.tasks])
+    for item in payload.tasks:
+        task = Task(
+            id=item.id,
+            workspace_id=workspace,
+            title=item.title,
+            time=item.time,
+            end_time=item.end_time,
+            category=item.category,
+            date=item.date,
+            completed=item.completed,
+        )
+        task.subtasks = [
+            TaskSubtask(
+                id=subtask.id,
+                task_id=item.id,
+                workspace_id=workspace,
+                title=subtask.title,
+                done=subtask.done,
+                position=index,
+            )
+            for index, subtask in enumerate(item.subtasks)
+        ]
+        db.add(task)
     for item in payload.missions:
         completion_dates = list(dict.fromkeys(item.completion_dates))
         if "completion_dates" not in item.model_fields_set and item.completed:
@@ -191,7 +214,12 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
         .where(ScholarshipEntry.workspace_id == workspace)
         .order_by(ScholarshipEntry.deadline, ScholarshipEntry.name)
     ).all()
-    tasks = db.scalars(select(Task).where(Task.workspace_id == workspace).order_by(Task.date, Task.time)).all()
+    tasks = db.scalars(
+        select(Task)
+        .options(selectinload(Task.subtasks))
+        .where(Task.workspace_id == workspace)
+        .order_by(Task.date, Task.time)
+    ).all()
     missions = db.scalars(
         select(Mission)
         .options(selectinload(Mission.completions))
@@ -220,7 +248,22 @@ def read_dashboard(db: Session, workspace: str) -> DashboardSchema | None:
 
     return DashboardSchema.model_validate(
         {
-            "tasks": [{"id": item.id, "title": item.title, "time": item.time, "end_time": item.end_time, "category": item.category, "date": item.date, "completed": item.completed} for item in tasks],
+            "tasks": [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "time": item.time,
+                    "end_time": item.end_time,
+                    "category": item.category,
+                    "date": item.date,
+                    "completed": item.completed,
+                    "subtasks": [
+                        {"id": subtask.id, "title": subtask.title, "done": subtask.done}
+                        for subtask in item.subtasks
+                    ],
+                }
+                for item in tasks
+            ],
             "missions": [
                 {
                     "id": item.id,

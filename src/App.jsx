@@ -22,6 +22,7 @@ import {
   Flame,
   HeartPulse,
   LayoutList,
+  ListPlus,
   Menu,
   MoreHorizontal,
   Plus,
@@ -47,6 +48,8 @@ const SHARED_WORKSPACE_ID = 'tkrowling-dashboard'
 const NOTIFICATION_READ_KEY = 'daymark-notifications-read-v1'
 const NOTIFICATION_SENT_KEY = 'daymark-notifications-sent-v1'
 const MISSION_XP_VALUES = [1, 3, 5, 10]
+const TIME_HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'))
+const TIME_MINUTES = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'))
 
 const RANK_ORDER = ['E', 'D', 'C', 'B', 'A', 'S']
 const RANK_FORMS = {
@@ -67,6 +70,17 @@ const addDays = (amount) => {
   const date = new Date()
   date.setDate(date.getDate() + amount)
   return localISO(date)
+}
+
+const to24Hour = (value = '') => {
+  const match = String(value).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+  if (!match) return String(value)
+  let hour = Number(match[1])
+  const minute = Math.min(59, Number(match[2]))
+  const period = match[3]?.toUpperCase()
+  if (period === 'PM' && hour !== 12) hour += 12
+  if (period === 'AM' && hour === 12) hour = 0
+  return `${String(Math.min(23, hour)).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 const seedData = () => ({
@@ -132,7 +146,13 @@ function normalizeDashboard(value) {
       ), 3)
     return { ...mission, xp }
   })
-  return { ...dashboard, missions, scholarships }
+  const tasks = (value.tasks ?? []).map((task) => ({
+    ...task,
+    time: to24Hour(task.time),
+    end_time: to24Hour(task.end_time),
+    subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
+  }))
+  return { ...dashboard, tasks, missions, scholarships }
 }
 
 function getWorkspaceId() {
@@ -309,7 +329,7 @@ function buildNotificationItems(data) {
       id: `task-${task.id}-${task.date}`,
       kind: 'task',
       title: task.title,
-      text: `${task.date === today ? 'Today' : formatDate(task.date, { weekday: 'short' })} · ${task.time}${task.end_time ? ` – ${task.end_time}` : ''}`,
+      text: `${task.date === today ? 'Today' : formatDate(task.date, { weekday: 'short' })} · ${to24Hour(task.time)}${task.end_time ? ` – ${to24Hour(task.end_time)}` : ''}`,
       when: startsAt.getTime(),
     }))
 
@@ -529,17 +549,62 @@ function Topbar({ title, onMenu, apiStatus, onRetry, data }) {
   )
 }
 
-function TaskRow({ task, onToggle, onDelete, onCopy, detailed = false }) {
+function Time24Field({ label, value, onChange }) {
+  const normalized = to24Hour(value || '00:00')
+  const [hour = '00', minute = '00'] = normalized.split(':')
+  const minuteOptions = TIME_MINUTES.includes(minute) ? TIME_MINUTES : [...TIME_MINUTES, minute].sort()
+
   return (
-    <div className={`task-row ${task.completed ? 'completed' : ''}`}>
-      <button className="task-check" onClick={() => onToggle(task.id)} aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}>
-        {task.completed ? <Check size={14} strokeWidth={3} /> : null}
-      </button>
-      <div className="task-time">{task.time}{task.end_time ? <><span>–</span>{task.end_time}</> : null}</div>
-      <div className="task-copy"><strong>{task.title}</strong>{detailed && <small>{formatDate(task.date, { weekday: 'short' })}</small>}</div>
-      <span className={`category-tag ${categoryClass(task.category)}`}>{task.category}</span>
-      {onCopy && <button className="row-copy" onClick={() => onCopy(task)} aria-label={`Copy ${task.title} to today`} title="Copy to today"><Copy size={15} /><span>Today</span></button>}
-      {onDelete && <button className="row-delete" onClick={() => onDelete(task.id)} aria-label="Delete task"><Trash2 size={16} /></button>}
+    <label className="time-24-field">
+      <span>{label}</span>
+      <div className="time-24-control">
+        <select value={hour} onChange={(event) => onChange(`${event.target.value}:${minute}`)} aria-label={`${label} hour in 24-hour format`}>
+          {TIME_HOURS.map((option) => <option value={option} key={option}>{option}</option>)}
+        </select>
+        <b>:</b>
+        <select value={minute} onChange={(event) => onChange(`${hour}:${event.target.value}`)} aria-label={`${label} minutes`}>
+          {minuteOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+        </select>
+      </div>
+    </label>
+  )
+}
+
+function TaskRow({ task, onToggle, onDelete, onCopy, onAddSubtask, onToggleSubtask, onDeleteSubtask, detailed = false }) {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [subtaskTitle, setSubtaskTitle] = useState('')
+  const subtasks = task.subtasks ?? []
+  const completedSubtasks = subtasks.filter((subtask) => subtask.done).length
+  const addSubtask = (event) => {
+    event.preventDefault()
+    const title = subtaskTitle.trim()
+    if (!title) return
+    onAddSubtask(task.id, title)
+    setSubtaskTitle('')
+  }
+
+  return (
+    <div className={`task-item ${detailsOpen ? 'details-open' : ''}`}>
+      <div className={`task-row ${task.completed ? 'completed' : ''}`}>
+        <button className="task-check" onClick={() => onToggle(task.id)} aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}>
+          {task.completed ? <Check size={14} strokeWidth={3} /> : null}
+        </button>
+        <div className="task-time">{to24Hour(task.time)}{task.end_time ? <><span>–</span>{to24Hour(task.end_time)}</> : null}</div>
+        <div className="task-copy"><strong>{task.title}</strong>{detailed && <small>{formatDate(task.date, { weekday: 'short' })}</small>}</div>
+        {onAddSubtask && <button className={`subtask-toggle ${detailsOpen ? 'active' : ''}`} onClick={() => setDetailsOpen((open) => !open)} aria-expanded={detailsOpen} aria-label={`Show details for ${task.title}`}><ListPlus size={14} /><span>{subtasks.length ? `${completedSubtasks}/${subtasks.length}` : 'Details'}</span><ChevronDown size={13} /></button>}
+        <span className={`category-tag ${categoryClass(task.category)}`}>{task.category}</span>
+        {onCopy && <button className="row-copy" onClick={() => onCopy(task)} aria-label={`Copy ${task.title} to today`} title="Copy to today"><Copy size={15} /><span>Today</span></button>}
+        {onDelete && <button className="row-delete" onClick={() => onDelete(task.id)} aria-label="Delete task"><Trash2 size={16} /></button>}
+      </div>
+      {detailsOpen && onAddSubtask && <div className="subtask-panel">
+        <div className="subtask-panel-head"><div><span>Task details</span><strong>What you’re going to do</strong></div><small>{completedSubtasks} of {subtasks.length} complete</small></div>
+        {subtasks.length > 0 && <div className="subtask-list">{subtasks.map((subtask) => <div className={`subtask-row ${subtask.done ? 'done' : ''}`} key={subtask.id}>
+          <button className="subtask-check" onClick={() => onToggleSubtask(task.id, subtask.id)} aria-label={subtask.done ? `Mark ${subtask.title} incomplete` : `Complete ${subtask.title}`}>{subtask.done ? <Check size={12} strokeWidth={3} /> : null}</button>
+          <span>{subtask.title}</span>
+          <button className="subtask-delete" onClick={() => onDeleteSubtask(task.id, subtask.id)} aria-label={`Delete ${subtask.title}`}><Trash2 size={14} /></button>
+        </div>)}</div>}
+        <form className="subtask-add" onSubmit={addSubtask}><input value={subtaskTitle} onChange={(event) => setSubtaskTitle(event.target.value)} placeholder="Add a step or detail…" maxLength={240} /><button type="submit" disabled={!subtaskTitle.trim()}><Plus size={14} /> Add subtask</button></form>
+      </div>}
     </div>
   )
 }
@@ -764,11 +829,19 @@ function SystemPage({ data, setData, apiStatus, onSaveProgress }) {
 function TaskPage({ data, setData }) {
   const [filter, setFilter] = useState('All')
   const [dayFilter, setDayFilter] = useState('all')
-  const [form, setForm] = useState({ title: '', time: '09:00', end_time: '10:00', category: 'Personal', date: localISO() })
+  const [form, setForm] = useState({ title: '', time: '09:00', end_time: '10:00', category: 'Personal', date: localISO(), subtasks: [] })
+  const [subtaskDraft, setSubtaskDraft] = useState('')
   const [formMessage, setFormMessage] = useState(null)
   const [copyMessage, setCopyMessage] = useState(null)
   const taskInputRef = useRef(null)
   const categories = ['All', 'Personal', 'Study', 'Scholarship', 'Fitness', 'Wellness']
+
+  const addDraftSubtask = () => {
+    const title = subtaskDraft.trim()
+    if (!title) return
+    setForm((current) => ({ ...current, subtasks: [...current.subtasks, { id: crypto.randomUUID(), title, done: false }] }))
+    setSubtaskDraft('')
+  }
 
   const addTask = (event) => {
     event.preventDefault()
@@ -785,16 +858,29 @@ function TaskPage({ data, setData }) {
       setFormMessage({ type: 'error', text: 'The ending time must be later than the start time.' })
       return
     }
-    const time = new Date(`2000-01-01T${form.time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    const end_time = new Date(`2000-01-01T${form.end_time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    const time = to24Hour(form.time)
+    const end_time = to24Hour(form.end_time)
     setData((current) => ({ ...current, tasks: [...current.tasks, { ...form, title: form.title.trim(), time, end_time, id: crypto.randomUUID(), completed: false }] }))
     setFilter('All')
     setDayFilter(form.date)
     setFormMessage({ type: 'success', text: `“${form.title.trim()}” was added to your plan.` })
-    setForm((current) => ({ ...current, title: '' }))
+    setForm((current) => ({ ...current, title: '', subtasks: [] }))
+    setSubtaskDraft('')
   }
   const toggleTask = (id) => setData((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? { ...task, completed: !task.completed } : task) }))
   const deleteTask = (id) => setData((current) => ({ ...current, tasks: current.tasks.filter((task) => task.id !== id) }))
+  const addSubtask = (taskId, title) => setData((current) => ({
+    ...current,
+    tasks: current.tasks.map((task) => task.id === taskId ? { ...task, subtasks: [...(task.subtasks ?? []), { id: crypto.randomUUID(), title, done: false }] } : task),
+  }))
+  const toggleSubtask = (taskId, subtaskId) => setData((current) => ({
+    ...current,
+    tasks: current.tasks.map((task) => task.id === taskId ? { ...task, subtasks: (task.subtasks ?? []).map((subtask) => subtask.id === subtaskId ? { ...subtask, done: !subtask.done } : subtask) } : task),
+  }))
+  const deleteSubtask = (taskId, subtaskId) => setData((current) => ({
+    ...current,
+    tasks: current.tasks.map((task) => task.id === taskId ? { ...task, subtasks: (task.subtasks ?? []).filter((subtask) => subtask.id !== subtaskId) } : task),
+  }))
   const copyTaskToToday = (task) => {
     const today = localISO()
     const alreadyScheduled = data.tasks.some((candidate) => (
@@ -812,14 +898,20 @@ function TaskPage({ data, setData }) {
       return
     }
 
-    const copiedTask = { ...task, id: crypto.randomUUID(), date: today, completed: false }
+    const copiedTask = {
+      ...task,
+      id: crypto.randomUUID(),
+      date: today,
+      completed: false,
+      subtasks: (task.subtasks ?? []).map((subtask) => ({ ...subtask, id: crypto.randomUUID(), done: false })),
+    }
     setData((current) => ({ ...current, tasks: [...current.tasks, copiedTask] }))
     setCopyMessage({ type: 'success', text: `“${task.title}” was copied to today.` })
   }
   const taskDays = useMemo(() => [...new Set(data.tasks.map((task) => task.date))].sort(), [data.tasks])
   const visibleTasks = data.tasks
     .filter((task) => (filter === 'All' || task.category === filter) && (dayFilter === 'all' || task.date === dayFilter))
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .sort((a, b) => a.date.localeCompare(b.date) || to24Hour(a.time).localeCompare(to24Hour(b.time)))
   const groupedTasks = visibleTasks.reduce((groups, task) => {
     if (!groups[task.date]) groups[task.date] = []
     groups[task.date].push(task)
@@ -853,10 +945,15 @@ function TaskPage({ data, setData }) {
         <form className="task-form" onSubmit={addTask}>
           <label className="wide-input"><span>Task name <i>Required</i></span><input ref={taskInputRef} value={form.title} onChange={(e) => { setForm({ ...form, title: e.target.value }); if (formMessage?.type === 'error') setFormMessage(null) }} placeholder="e.g. Finish scholarship essay" autoFocus aria-invalid={formMessage?.type === 'error'} /></label>
           <label><span>Date</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label><span>Start time</span><input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></label>
-          <label><span>Ending time</span><input type="time" value={form.end_time} min={form.time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} /></label>
+          <Time24Field label="Start time" value={form.time} onChange={(time) => setForm({ ...form, time })} />
+          <Time24Field label="Ending time" value={form.end_time} onChange={(end_time) => setForm({ ...form, end_time })} />
           <label><span>Category</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{categories.slice(1).map((category) => <option key={category}>{category}</option>)}</select></label>
           <button className="primary-button" type="submit"><Plus size={17} /> Add task</button>
+          <div className="task-subtask-builder">
+            <div><span>Task details <i>Optional</i></span><small>Break this task into clear actions.</small></div>
+            <div className="task-subtask-entry"><input value={subtaskDraft} onChange={(event) => setSubtaskDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addDraftSubtask() } }} placeholder="e.g. Research sources, write outline…" maxLength={240} /><button type="button" onClick={addDraftSubtask} disabled={!subtaskDraft.trim()}><Plus size={15} /> Add subtask</button></div>
+            {form.subtasks.length > 0 && <div className="task-subtask-chips">{form.subtasks.map((subtask) => <span key={subtask.id}>{subtask.title}<button type="button" onClick={() => setForm((current) => ({ ...current, subtasks: current.subtasks.filter((item) => item.id !== subtask.id) }))} aria-label={`Remove ${subtask.title}`}><X size={12} /></button></span>)}</div>}
+          </div>
         </form>
         {formMessage && <div className={`form-message ${formMessage.type}`} role="status" aria-live="polite">{formMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}<span>{formMessage.text}</span></div>}
       </div>
@@ -892,7 +989,7 @@ function TaskPage({ data, setData }) {
                 <span className="day-completion"><CheckCircle2 size={15} /> {completedForDay} of {tasks.length} done</span>
               </header>
               <div className="task-list detailed">
-                {tasks.map((task) => <TaskRow key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onCopy={task.date < localISO() ? copyTaskToToday : null} />)}
+                {tasks.map((task) => <TaskRow key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onCopy={task.date < localISO() ? copyTaskToToday : null} onAddSubtask={addSubtask} onToggleSubtask={toggleSubtask} onDeleteSubtask={deleteSubtask} />)}
               </div>
             </section>
           })}

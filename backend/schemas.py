@@ -17,6 +17,12 @@ def normalize_mission_xp(value: int | str) -> int:
     return min(MISSION_XP_VALUES, key=lambda option: abs(option - reward))
 
 
+class SubtaskSchema(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=36)
+    title: str = Field(min_length=1, max_length=240)
+    done: bool = False
+
+
 class TaskSchema(BaseModel):
     id: str = Field(min_length=1, max_length=36)
     title: str = Field(min_length=1, max_length=240)
@@ -25,6 +31,7 @@ class TaskSchema(BaseModel):
     category: str = Field(min_length=1, max_length=50)
     date: date
     completed: bool = False
+    subtasks: list[SubtaskSchema] = Field(default_factory=list, max_length=100)
 
 
 class MissionSchema(BaseModel):

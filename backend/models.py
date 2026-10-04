@@ -17,6 +17,27 @@ class Task(Base):
     category: Mapped[str] = mapped_column(String(50))
     date: Mapped[date] = mapped_column(Date)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    subtasks: Mapped[list["TaskSubtask"]] = relationship(
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="TaskSubtask.position",
+    )
+
+
+class TaskSubtask(Base):
+    __tablename__ = "task_subtasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    task: Mapped[Task] = relationship(back_populates="subtasks")
 
 
 class Mission(Base):
