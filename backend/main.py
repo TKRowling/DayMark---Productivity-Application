@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import delete, select, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from database import Base, engine, get_db
 from migrations import run_schema_migrations
 from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, TaskSubtask, WeightEntry, Workout
-from schemas import DashboardResponse, DashboardSchema
+from schemas import DashboardResponse, DashboardSchema, WeightSchema
 
 
 WORKSPACE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -46,7 +46,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "PUT", "OPTIONS"],
+    allow_methods=["GET", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Workspace-ID"],
 )
 
@@ -326,3 +326,49 @@ def put_dashboard(
 ) -> DashboardResponse:
     replace_dashboard(db, workspace, payload)
     return response_for(payload)
+
+
+@app.put("/api/weights", response_model=WeightSchema)
+def put_weight(
+    payload: WeightSchema,
+    workspace: str = Depends(workspace_id),
+    db: Session = Depends(get_db),
+) -> WeightSchema:
+    """Create or replace one daily check-in without rewriting the dashboard."""
+    entry = db.scalar(
+        select(WeightEntry).where(
+            WeightEntry.workspace_id == workspace,
+            WeightEntry.date == payload.date,
+        )
+    )
+    if entry is None:
+        entry = WeightEntry(
+            id=payload.id,
+            workspace_id=workspace,
+            date=payload.date,
+            value=payload.value,
+        )
+        db.add(entry)
+    else:
+        entry.value = payload.value
+
+    db.commit()
+    return WeightSchema(id=entry.id, date=entry.date, value=entry.value)
+
+
+@app.delete("/api/weights/{entry_id}", status_code=204)
+def delete_weight(
+    entry_id: str,
+    workspace: str = Depends(workspace_id),
+    db: Session = Depends(get_db),
+) -> Response:
+    result = db.execute(
+        delete(WeightEntry).where(
+            WeightEntry.id == entry_id,
+            WeightEntry.workspace_id == workspace,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Weight check-in not found")
+    db.commit()
+    return Response(status_code=204)

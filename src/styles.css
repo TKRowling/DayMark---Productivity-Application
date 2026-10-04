@@ -78,6 +78,7 @@ input, select, textarea { color: var(--ink); }
 .sync-status.connecting svg, .sync-status.saving svg { animation: sync-spin 1.2s linear infinite; }
 .sync-status.offline { color: #b35e49; background: var(--coral-soft); }
 @keyframes sync-spin { to { transform: rotate(360deg); } }
+.spin { animation: sync-spin 1.2s linear infinite; }
 .search { width: 215px; height: 40px; display: flex; align-items: center; gap: 9px; color: #8f948a; background: #e9ece5; border: 1px solid transparent; border-radius: 11px; padding: 0 13px; transition: .2s ease; }
 .search:focus-within { width: 230px; border-color: #c8d0c3; background: white; }
 .search input { min-width: 0; width: 100%; border: 0; outline: none; background: transparent; font-size: 12px; }
@@ -223,6 +224,7 @@ input:focus, select:focus, textarea:focus { border-color: #98aa91; background: w
 .primary-button, .secondary-button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 10px; padding: 0 17px; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .primary-button { color: white; background: var(--green); box-shadow: 0 6px 15px rgba(78,96,73,.16); }
 .primary-button:hover { background: var(--green-dark); }
+.primary-button:disabled { cursor: wait; opacity: .62; }
 .secondary-button { background: white; border: 1px solid #dfe2da; color: #62675e; }
 .secondary-button:hover { background: #f5f6f1; }
 .form-message { display: flex; align-items: center; gap: 7px; min-height: 34px; margin-top: 12px; padding: 8px 11px; border-radius: 9px; font-size: 11px; font-weight: 600; }
@@ -376,6 +378,7 @@ input:focus, select:focus, textarea:focus { border-color: #98aa91; background: w
 .weight-history small.up { color: var(--coral); }
 .weight-history button { display: grid; place-items: center; width: 25px; height: 25px; color: #b2b6ae; background: transparent; border-radius: 7px; }
 .weight-history button:hover { color: #c75e4d; background: var(--coral-soft); }
+.weight-history button:disabled { cursor: wait; opacity: .6; }
 
 /* Wellness */
 .segment-tabs { justify-self: start; display: flex; padding: 4px; gap: 4px; border-radius: 11px; background: #e8eae4; }

@@ -1169,6 +1169,9 @@ function ScholarshipModal({ mode, draft, setDraft, onClose, onSave }) {
 function WeightPage({ data, setData }) {
   const [weight, setWeight] = useState('')
   const [date, setDate] = useState(localISO())
+  const [saveState, setSaveState] = useState('idle')
+  const [deletingId, setDeletingId] = useState(null)
+  const [formMessage, setFormMessage] = useState(null)
   const sorted = useMemo(() => [...data.weights].sort((a, b) => a.date.localeCompare(b.date)), [data.weights])
   const latest = sorted.at(-1)?.value || 0
   const first = sorted.at(0)?.value || latest
@@ -1176,17 +1179,56 @@ function WeightPage({ data, setData }) {
   const goal = 75
   const remaining = Math.max(0, latest - goal)
 
-  const addWeight = (event) => {
+  const addWeight = async (event) => {
     event.preventDefault()
     const value = Number(weight)
     if (!value || value < 20 || value > 400) return
-    setData((current) => {
-      const withoutDate = current.weights.filter((entry) => entry.date !== date)
-      return { ...current, weights: [...withoutDate, { id: crypto.randomUUID(), date, value }].sort((a, b) => a.date.localeCompare(b.date)) }
-    })
-    setWeight('')
+    const existing = data.weights.find((entry) => entry.date === date)
+    const entry = { id: existing?.id ?? crypto.randomUUID(), date, value }
+    setSaveState('saving')
+    setFormMessage(null)
+
+    try {
+      const response = await fetch('/api/weights', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Workspace-ID': getWorkspaceId(),
+        },
+        body: JSON.stringify(entry),
+      })
+      if (!response.ok) throw new Error(`API responded with ${response.status}`)
+      const savedEntry = await response.json()
+      setData((current) => {
+        const withoutDate = current.weights.filter((item) => item.date !== savedEntry.date)
+        return { ...current, weights: [...withoutDate, savedEntry].sort((a, b) => a.date.localeCompare(b.date)) }
+      })
+      setWeight('')
+      setFormMessage({ type: 'success', text: `${savedEntry.value} kg was saved to your account for ${formatDate(savedEntry.date)}.` })
+    } catch {
+      setFormMessage({ type: 'error', text: 'This check-in was not saved. Your values are still hereâ€”check the connection and press Save check-in again.' })
+    } finally {
+      setSaveState('idle')
+    }
   }
-  const removeWeight = (id) => setData((current) => ({ ...current, weights: current.weights.filter((entry) => entry.id !== id) }))
+
+  const removeWeight = async (entry) => {
+    setDeletingId(entry.id)
+    setFormMessage(null)
+    try {
+      const response = await fetch(`/api/weights/${encodeURIComponent(entry.id)}`, {
+        method: 'DELETE',
+        headers: { 'X-Workspace-ID': getWorkspaceId() },
+      })
+      if (!response.ok) throw new Error(`API responded with ${response.status}`)
+      setData((current) => ({ ...current, weights: current.weights.filter((item) => item.id !== entry.id) }))
+      setFormMessage({ type: 'success', text: `The ${formatDate(entry.date)} check-in was deleted.` })
+    } catch {
+      setFormMessage({ type: 'error', text: 'That check-in could not be deleted. Nothing was removed; please try again.' })
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <div className="page-stack inner-page">
@@ -1208,8 +1250,9 @@ function WeightPage({ data, setData }) {
           <form className="weight-form" onSubmit={addWeight}>
             <label><span>Weight (kg)</span><div className="unit-input"><input type="number" min="20" max="400" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="79.4" required /><i>kg</i></div></label>
             <label><span>Date</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
-            <button className="primary-button"><Plus size={17} /> Add check-in</button>
+            <button className="primary-button" disabled={saveState === 'saving'}>{saveState === 'saving' ? <RefreshCw className="spin" size={17} /> : <Cloud size={17} />} {saveState === 'saving' ? 'Saving to account...' : 'Save check-in'}</button>
           </form>
+          {formMessage && <div className={`form-message ${formMessage.type}`} role="status" aria-live="polite">{formMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}<span>{formMessage.text}</span></div>}
           <p className="form-note"><HeartPulse size={15} /> Daily fluctuations are normal. Weekly trends tell the real story.</p>
         </div>
         <div className="card history-card">
@@ -1218,7 +1261,7 @@ function WeightPage({ data, setData }) {
             {[...sorted].reverse().slice(0, 5).map((entry, index, array) => {
               const prior = sorted[sorted.findIndex((item) => item.id === entry.id) - 1]
               const delta = prior ? entry.value - prior.value : 0
-              return <div key={entry.id}><span>{formatDate(entry.date, { weekday: 'short' })}</span><strong>{entry.value} kg</strong><small className={delta <= 0 ? 'down' : 'up'}>{prior ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)}` : 'Start'}</small><button onClick={() => removeWeight(entry.id)}><Trash2 size={15} /></button></div>
+              return <div key={entry.id}><span>{formatDate(entry.date, { weekday: 'short' })}</span><strong>{entry.value} kg</strong><small className={delta <= 0 ? 'down' : 'up'}>{prior ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)}` : 'Start'}</small><button onClick={() => removeWeight(entry)} disabled={deletingId === entry.id} aria-label={`Delete ${formatDate(entry.date)} check-in`}>{deletingId === entry.id ? <RefreshCw className="spin" size={15} /> : <Trash2 size={15} />}</button></div>
             })}
           </div>
         </div>
