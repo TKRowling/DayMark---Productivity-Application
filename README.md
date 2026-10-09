@@ -57,7 +57,7 @@ The production backend intentionally returns a configuration error when `DATABAS
 
 ## Telegram bot
 
-The FastAPI service includes a private Telegram integration for activities and daily missions. It supports guided activity creation with 24-hour start/end times and subtasks, repeating mission creation with 1/3/5/10 XP, today's plan, completion buttons, and a daily briefing. Conversation state is stored in PostgreSQL so a serverless restart does not interrupt an in-progress form.
+The FastAPI service includes a private Telegram integration for activities and daily missions. Today's activities are date-specific and shown on their own screen, while fixed missions repeat every day on a separate mission screen. The bot supports guided activity creation with 24-hour start/end times and subtasks, repeating mission creation with 1/3/5/10 XP, separate completion buttons, and separate daily briefing messages. Conversation state is stored in PostgreSQL so a serverless restart does not interrupt an in-progress form.
 
 Create these Vercel environment variables before activating the bot:
 

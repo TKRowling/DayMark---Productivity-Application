@@ -33,10 +33,12 @@ CATEGORIES = ("Personal", "Study", "Scholarship", "Fitness", "Wellness")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 BOT_COMMANDS = [
-    {"command": "today", "description": "Show today's activities and missions"},
+    {"command": "today", "description": "Show today's activities"},
+    {"command": "missions", "description": "Show fixed daily missions"},
     {"command": "addtask", "description": "Add an activity"},
     {"command": "addmission", "description": "Add a repeating daily mission"},
-    {"command": "done", "description": "Complete an activity or mission"},
+    {"command": "done", "description": "Complete today's activity"},
+    {"command": "missiondone", "description": "Complete today's mission"},
     {"command": "settings", "description": "Manage Telegram reminders"},
     {"command": "cancel", "description": "Cancel the current form"},
     {"command": "help", "description": "Show available commands"},
@@ -139,8 +141,9 @@ def _inline_keyboard(rows: list[list[tuple[str, str]]]) -> dict:
 def _home_keyboard() -> dict:
     return _inline_keyboard(
         [
-            [("📅 Today's plan", "menu:today"), ("✅ Complete", "menu:done")],
-            [("➕ Add activity", "menu:addtask"), ("⚔️ Add mission", "menu:addmission")],
+            [("📅 Today's activities", "menu:today"), ("⚔️ Daily missions", "menu:missions")],
+            [("➕ Add activity", "menu:addtask"), ("➕ Add mission", "menu:addmission")],
+            [("✅ Complete activity", "menu:done"), ("✅ Complete mission", "menu:missiondone")],
             [("⚙️ Reminder settings", "menu:settings")],
         ]
     )
@@ -250,10 +253,12 @@ def _help(account: TelegramAccount) -> None:
         account.chat_id,
         (
             "<b>Daymark commands</b>\n\n"
-            "/today — show today's activities and missions\n"
+            "/today — show only today's dated activities\n"
+            "/missions — show fixed missions that repeat every day\n"
             "/addtask — add an activity with date, 24-hour times, category and subtasks\n"
             "/addmission — add a repeating daily mission\n"
-            "/done — complete an activity or today's mission\n"
+            "/done — complete one of today's activities\n"
+            "/missiondone — complete a fixed mission for today\n"
             "/settings — manage reminders\n"
             "/cancel — cancel the current form"
         ),
@@ -261,7 +266,7 @@ def _help(account: TelegramAccount) -> None:
     )
 
 
-def _today_data(db: Session, account: TelegramAccount) -> tuple[date, list[Task], list[Mission]]:
+def _today_tasks(db: Session, account: TelegramAccount) -> tuple[date, list[Task]]:
     today = _today_for(account)
     tasks = list(
         db.scalars(
@@ -270,6 +275,11 @@ def _today_data(db: Session, account: TelegramAccount) -> tuple[date, list[Task]
             .order_by(Task.time, Task.title)
         ).all()
     )
+    return today, tasks
+
+
+def _daily_missions(db: Session, account: TelegramAccount) -> tuple[date, list[Mission]]:
+    today = _today_for(account)
     missions = list(
         db.scalars(
             select(Mission)
@@ -278,12 +288,12 @@ def _today_data(db: Session, account: TelegramAccount) -> tuple[date, list[Task]
             .order_by(Mission.title)
         ).all()
     )
-    return today, tasks, missions
+    return today, missions
 
 
-def _today_text(db: Session, account: TelegramAccount) -> str:
-    today, tasks, missions = _today_data(db, account)
-    lines = [f"<b>YOUR PLAN — {_escape(_friendly_date(today))}</b>", "", "<b>Activities</b>"]
+def _activities_text(db: Session, account: TelegramAccount) -> str:
+    today, tasks = _today_tasks(db, account)
+    lines = [f"<b>TODAY'S ACTIVITIES — {_escape(_friendly_date(today))}</b>", ""]
     if tasks:
         for task in tasks[:12]:
             marker = "✅" if task.completed else "▫️"
@@ -292,9 +302,13 @@ def _today_text(db: Session, account: TelegramAccount) -> str:
         if len(tasks) > 12:
             lines.append(f"…and {len(tasks) - 12} more activities on the website.")
     else:
-        lines.append("No activities scheduled.")
+        lines.append("No activities scheduled for today.")
+    return "\n".join(lines)
 
-    lines.extend(["", "<b>Daily missions</b>"])
+
+def _missions_text(db: Session, account: TelegramAccount) -> str:
+    today, missions = _daily_missions(db, account)
+    lines = [f"<b>FIXED DAILY MISSIONS — {_escape(_friendly_date(today))}</b>", ""]
     if missions:
         for mission in missions[:12]:
             completed = any(item.completed_on == today for item in mission.completions)
@@ -303,34 +317,51 @@ def _today_text(db: Session, account: TelegramAccount) -> str:
         if len(missions) > 12:
             lines.append(f"…and {len(missions) - 12} more missions on the website.")
     else:
-        lines.append("No daily missions yet.")
+        lines.append("No fixed daily missions yet.")
     return "\n".join(lines)
 
 
 def _show_today(db: Session, account: TelegramAccount) -> None:
     send_message(
         account.chat_id,
-        _today_text(db, account),
+        _activities_text(db, account),
         _inline_keyboard(
-            [[("✅ Complete an item", "menu:done")], [("➕ Add activity", "menu:addtask")]]
+            [[("✅ Complete activity", "menu:done")], [("➕ Add activity", "menu:addtask")]]
         ),
     )
 
 
-def _show_completable(db: Session, account: TelegramAccount) -> None:
-    today, tasks, missions = _today_data(db, account)
+def _show_missions(db: Session, account: TelegramAccount) -> None:
+    send_message(
+        account.chat_id,
+        _missions_text(db, account),
+        _inline_keyboard(
+            [[("✅ Complete mission", "menu:missiondone")], [("➕ Add mission", "menu:addmission")]]
+        ),
+    )
+
+
+def _show_completable(db: Session, account: TelegramAccount, kind: str) -> None:
     rows: list[list[tuple[str, str]]] = []
-    for task in tasks:
-        if not task.completed:
-            rows.append([(f"Activity: {task.title[:35]}", f"done:t:{task.id}")])
-    for mission in missions:
-        if not any(item.completed_on == today for item in mission.completions):
-            rows.append([(f"Mission: {mission.title[:36]}", f"done:m:{mission.id}")])
+    if kind == "task":
+        _, tasks = _today_tasks(db, account)
+        for task in tasks:
+            if not task.completed:
+                rows.append([(task.title[:45], f"done:t:{task.id}")])
+        empty_message = "<b>Today's activities are clear.</b> Every scheduled activity is complete. 🎉"
+        prompt = "<b>Which activity did you complete?</b>"
+    else:
+        today, missions = _daily_missions(db, account)
+        for mission in missions:
+            if not any(item.completed_on == today for item in mission.completions):
+                rows.append([(mission.title[:45], f"done:m:{mission.id}")])
+        empty_message = "<b>Today's missions are clear.</b> Every fixed mission is complete. 🎉"
+        prompt = "<b>Which daily mission did you complete?</b>"
 
     if not rows:
-        send_message(account.chat_id, "<b>All clear.</b> Every item for today is already complete. 🎉")
+        send_message(account.chat_id, empty_message, _home_keyboard())
         return
-    send_message(account.chat_id, "<b>What did you complete?</b>", _inline_keyboard(rows[:40]))
+    send_message(account.chat_id, prompt, _inline_keyboard(rows[:40]))
 
 
 def _show_settings(account: TelegramAccount) -> None:
@@ -365,9 +396,15 @@ def _run_action(db: Session, account: TelegramAccount, action: str) -> None:
     if action == "today":
         _clear_state(account)
         _show_today(db, account)
+    elif action == "missions":
+        _clear_state(account)
+        _show_missions(db, account)
     elif action == "done":
         _clear_state(account)
-        _show_completable(db, account)
+        _show_completable(db, account, "task")
+    elif action == "missiondone":
+        _clear_state(account)
+        _show_completable(db, account, "mission")
     elif action == "addtask":
         _begin_task(account)
     elif action == "addmission":
@@ -702,8 +739,13 @@ def _send_daily_summary(db: Session, account: TelegramAccount) -> bool:
         return False
     send_message(
         account.chat_id,
-        f"☀️ <b>DAILY BRIEFING</b>\n\n{_today_text(db, account)}",
-        _inline_keyboard([[("✅ Complete an item", "menu:done"), ("➕ Add activity", "menu:addtask")]]),
+        f"☀️ <b>ACTIVITY BRIEFING</b>\n\n{_activities_text(db, account)}",
+        _inline_keyboard([[("✅ Complete activity", "menu:done"), ("➕ Add activity", "menu:addtask")]]),
+    )
+    send_message(
+        account.chat_id,
+        f"⚔️ <b>DAILY MISSIONS</b>\n\n{_missions_text(db, account)}",
+        _inline_keyboard([[("✅ Complete mission", "menu:missiondone"), ("➕ Add mission", "menu:addmission")]]),
     )
     _record_notification(db, account, dedupe_key)
     return True

@@ -79,6 +79,10 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(setup.status_code, 200)
         self.assertEqual(setup.json()["bot_username"], "tkr_daymark_bot")
+        command_payload = next(payload for method, payload in self.outbound if method == "setMyCommands")
+        command_names = {item["command"] for item in command_payload["commands"]}
+        self.assertIn("missions", command_names)
+        self.assertIn("missiondone", command_names)
 
         unauthorized = self.client.post(
             "/api/telegram/webhook",
@@ -125,6 +129,38 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertTrue(status.json()["linked"])
 
         first_today = self.telegram_update(13, "/today")
+        today_message = self.outbound[-1][1]
+        self.assertIn("TODAY'S ACTIVITIES", today_message["text"])
+        self.assertIn("Evening training", today_message["text"])
+        self.assertNotIn("Drink enough water", today_message["text"])
+
+        missions = self.telegram_update(14, "/missions")
+        missions_message = self.outbound[-1][1]
+        self.assertEqual(missions.status_code, 200)
+        self.assertIn("FIXED DAILY MISSIONS", missions_message["text"])
+        self.assertIn("Drink enough water", missions_message["text"])
+        self.assertNotIn("Evening training", missions_message["text"])
+
+        activities_to_complete = self.telegram_update(15, "/done")
+        activity_callbacks = [
+            button["callback_data"]
+            for row in self.outbound[-1][1]["reply_markup"]["inline_keyboard"]
+            for button in row
+        ]
+        self.assertEqual(activities_to_complete.status_code, 200)
+        self.assertTrue(activity_callbacks)
+        self.assertTrue(all(value.startswith("done:t:") for value in activity_callbacks))
+
+        missions_to_complete = self.telegram_update(16, "/missiondone")
+        mission_callbacks = [
+            button["callback_data"]
+            for row in self.outbound[-1][1]["reply_markup"]["inline_keyboard"]
+            for button in row
+        ]
+        self.assertEqual(missions_to_complete.status_code, 200)
+        self.assertTrue(mission_callbacks)
+        self.assertTrue(all(value.startswith("done:m:") for value in mission_callbacks))
+
         duplicate_today = self.telegram_update(13, "/today")
         self.assertEqual(first_today.json()["status"], "processed")
         self.assertEqual(duplicate_today.json()["status"], "duplicate")
