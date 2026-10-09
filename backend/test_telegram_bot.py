@@ -94,7 +94,7 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(parsed_sample["end_time"], "12:00")
         self.assertEqual(parsed_sample["title"], "WORK")
         self.assertEqual(parsed_sample["date"], sample_now.date())
-        self.assertEqual(parsed_sample["category"], "Personal")
+        self.assertNotIn("category", parsed_sample)
 
         setup = self.client.post(
             "/api/telegram/setup",
@@ -119,7 +119,7 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             self.telegram_update(2, "/addtask"),
             self.telegram_update(
                 3,
-                "20:00 - 21:00: Evening training | Fitness | today | Warm up, Main workout, Stretch",
+                "20:00 - 21:00: Evening training | today | Warm up, Main workout, Stretch",
             ),
             self.telegram_update(4, "/addmission"),
             self.telegram_update(5, "Drink enough water"),
@@ -127,6 +127,14 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             self.telegram_update(7, callback="mission_xp:3"),
         ]
         self.assertTrue(all(response.status_code == 200 for response in steps))
+        activity_saved_message = next(
+            payload["text"]
+            for method, payload in self.outbound
+            if method == "sendMessage" and "Activity saved to Daymark" in payload.get("text", "")
+        )
+        self.assertIn("Warm up", activity_saved_message)
+        self.assertIn("Main workout", activity_saved_message)
+        self.assertNotIn("Personal", activity_saved_message)
 
         dashboard = self.client.get(
             "/api/dashboard",
@@ -154,6 +162,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         today_message = self.outbound[-1][1]
         self.assertIn("TODAY'S ACTIVITIES", today_message["text"])
         self.assertIn("Evening training", today_message["text"])
+        self.assertIn("Warm up", today_message["text"])
+        self.assertNotIn("Personal", today_message["text"])
         self.assertNotIn("Drink enough water", today_message["text"])
 
         missions = self.telegram_update(14, "/missions")
@@ -215,6 +225,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(first_reminder.json()["task_reminders"], 1)
         self.assertIn("ACTIVITY STARTING NOW", reminder_message)
         self.assertIn("20:00–21:00", reminder_message)
+        self.assertIn("Warm up", reminder_message)
+        self.assertNotIn("Category:", reminder_message)
         self.assertEqual(duplicate_reminder.json()["task_reminders"], 0)
 
         completed_activity = self.telegram_update(17, callback=activity_callbacks[0])

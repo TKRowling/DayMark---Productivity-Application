@@ -276,6 +276,7 @@ def _today_tasks(db: Session, account: TelegramAccount) -> tuple[date, list[Task
     tasks = list(
         db.scalars(
             select(Task)
+            .options(selectinload(Task.subtasks))
             .where(Task.workspace_id == account.workspace_id, Task.date == today)
             .order_by(Task.time, Task.title)
         ).all()
@@ -303,7 +304,10 @@ def _activities_text(db: Session, account: TelegramAccount) -> str:
         for task in tasks[:12]:
             marker = "✅" if task.completed else "▫️"
             timing = f"{task.time}–{task.end_time}" if task.end_time else task.time
-            lines.append(f"{marker} <code>{_escape(timing)}</code> {_escape(task.title[:80])} · {_escape(task.category)}")
+            lines.append(f"{marker} <code>{_escape(timing)}</code> {_escape(task.title[:80])}")
+            for subtask in task.subtasks[:5]:
+                subtask_marker = "✅" if subtask.done else "↳"
+                lines.append(f"   {subtask_marker} {_escape(subtask.title[:100])}")
         if len(tasks) > 12:
             lines.append(f"…and {len(tasks) - 12} more activities on the website.")
     else:
@@ -396,9 +400,9 @@ def _begin_task(account: TelegramAccount) -> None:
             "Send the time and title in one message:\n"
             "<code>8:00 - 12:00: WORK</code>\n\n"
             "Optional format:\n"
-            "<code>13:00-15:00 Learning English | Study | tomorrow | Vocabulary, Listening</code>\n\n"
-            "Defaults: <b>today · Personal · no subtasks</b>\n"
-            "Categories: Personal, Study, Scholarship, Fitness, Wellness\n\n"
+            "<code>20:30-22:30 AI Agent | Data Quality Agent &amp; Fix the Auto Tuning</code>\n\n"
+            "Use commas for more subtasks. Add <code>| tomorrow</code> or "
+            "<code>| YYYY-MM-DD</code> when needed. The default date is today.\n\n"
             "Send /cancel to stop."
         ),
     )
@@ -461,17 +465,13 @@ def _parse_quick_activity(value: str, account: TelegramAccount) -> tuple[dict[st
     if not title or len(title) > 240:
         return None, "The activity title must be between 1 and 240 characters."
 
-    category = "Personal"
     task_date = _today_for(account)
     subtasks: list[str] = []
-    category_names = {item.lower(): item for item in CATEGORIES}
     for optional_value in parts[1:]:
         if not optional_value:
             continue
         lowered = optional_value.lower()
-        if lowered in category_names:
-            category = category_names[lowered]
-        elif lowered == "today":
+        if lowered == "today":
             task_date = _today_for(account)
         elif lowered == "tomorrow":
             task_date = _today_for(account) + timedelta(days=1)
@@ -487,7 +487,6 @@ def _parse_quick_activity(value: str, account: TelegramAccount) -> tuple[dict[st
         "date": task_date,
         "time": start_time,
         "end_time": end_time,
-        "category": category,
         "subtasks": subtasks,
     }, ""
 
@@ -506,7 +505,8 @@ def _save_quick_activity(db: Session, account: TelegramAccount, value: str) -> N
         date=parsed["date"],
         time=str(parsed["time"]),
         end_time=str(parsed["end_time"]),
-        category=str(parsed["category"]),
+        # The website schema still requires a value; Telegram no longer exposes activity categories.
+        category="Personal",
         completed=False,
     )
     task.subtasks = [
@@ -526,8 +526,12 @@ def _save_quick_activity(db: Session, account: TelegramAccount, value: str) -> N
         (
             "✅ <b>Activity saved to Daymark</b>\n"
             f"{_escape(task.title)}\n"
-            f"{_escape(_friendly_date(task.date))} · {task.time}–{task.end_time} · {_escape(task.category)}\n"
-            f"Subtasks: {len(subtasks)}"
+            f"{_escape(_friendly_date(task.date))} · {task.time}–{task.end_time}\n"
+            + (
+                "\n<b>Subtasks</b>\n" + "\n".join(f"↳ {_escape(title)}" for title in subtasks)
+                if subtasks
+                else "\nNo subtasks"
+            )
         ),
         _home_keyboard(),
     )
@@ -904,7 +908,6 @@ def _send_task_reminders(db: Session, account: TelegramAccount) -> int:
             "⏰ <b>ACTIVITY STARTING NOW</b>",
             "",
             f"<code>{_escape(timing)}</code>  <b>{_escape(task.title)}</b>",
-            f"Category: {_escape(task.category)}",
         ]
         if task.subtasks:
             lines.extend(["", "<b>What to do</b>"])
