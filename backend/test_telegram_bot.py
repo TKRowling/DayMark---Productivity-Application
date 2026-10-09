@@ -165,6 +165,32 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertIn("Warm up", today_message["text"])
         self.assertNotIn("Personal", today_message["text"])
         self.assertNotIn("Drink enough water", today_message["text"])
+        today_buttons = [
+            button
+            for row in today_message["reply_markup"]["inline_keyboard"]
+            for button in row
+        ]
+        edit_callback = next(
+            button["callback_data"]
+            for button in today_buttons
+            if button["callback_data"].startswith("task:edit:")
+        )
+        delete_callback = next(
+            button["callback_data"]
+            for button in today_buttons
+            if button["callback_data"].startswith("task:delete:")
+        )
+
+        begin_edit = self.telegram_update(19, callback=edit_callback)
+        self.assertEqual(begin_edit.status_code, 200)
+        self.assertIn("Edit activity", self.outbound[-1][1]["text"])
+        save_edit = self.telegram_update(
+            20,
+            "20:00-21:00 Evening training | Warm up, Main workout, Stretch, Cool down",
+        )
+        self.assertEqual(save_edit.status_code, 200)
+        self.assertIn("Activity updated in Daymark", self.outbound[-1][1]["text"])
+        self.assertIn("Cool down", self.outbound[-1][1]["text"])
 
         missions = self.telegram_update(14, "/missions")
         missions_message = self.outbound[-1][1]
@@ -264,6 +290,24 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertIn("Evening training", report_message)
         self.assertIn("Drink enough water", report_message)
         self.assertEqual(duplicate_report.json()["end_of_day_reports"], 0)
+
+        begin_delete = self.telegram_update(21, callback=delete_callback)
+        self.assertEqual(begin_delete.status_code, 200)
+        self.assertIn("Delete this activity?", self.outbound[-1][1]["text"])
+        confirm_delete_callback = next(
+            button["callback_data"]
+            for row in self.outbound[-1][1]["reply_markup"]["inline_keyboard"]
+            for button in row
+            if button["callback_data"].startswith("task:delete_confirm:")
+        )
+        confirm_delete = self.telegram_update(22, callback=confirm_delete_callback)
+        self.assertEqual(confirm_delete.status_code, 200)
+        self.assertNotIn("Evening training", self.outbound[-1][1]["text"])
+        dashboard_after_delete = self.client.get(
+            "/api/dashboard",
+            headers={"X-Workspace-ID": "tkrowling-dashboard"},
+        )
+        self.assertEqual(dashboard_after_delete.json()["tasks"], [])
 
 
 if __name__ == "__main__":

@@ -331,12 +331,21 @@ def _missions_text(db: Session, account: TelegramAccount) -> str:
 
 
 def _show_today(db: Session, account: TelegramAccount) -> None:
+    _, tasks = _today_tasks(db, account)
+    rows = [
+        [
+            (f"✏️ {task.title[:28]}", f"task:edit:{task.id}"),
+            ("🗑️ Delete", f"task:delete:{task.id}"),
+        ]
+        for task in tasks[:20]
+    ]
+    rows.extend(
+        [[("✅ Complete activity", "menu:done")], [("➕ Add activity", "menu:addtask")]]
+    )
     send_message(
         account.chat_id,
         _activities_text(db, account),
-        _inline_keyboard(
-            [[("✅ Complete activity", "menu:done")], [("➕ Add activity", "menu:addtask")]]
-        ),
+        _inline_keyboard(rows),
     )
 
 
@@ -491,24 +500,37 @@ def _parse_quick_activity(value: str, account: TelegramAccount) -> tuple[dict[st
     }, ""
 
 
-def _save_quick_activity(db: Session, account: TelegramAccount, value: str) -> None:
+def _save_quick_activity(
+    db: Session,
+    account: TelegramAccount,
+    value: str,
+    task: Task | None = None,
+) -> None:
     parsed, error = _parse_quick_activity(value, account)
     if parsed is None:
         send_message(account.chat_id, f"{error}\n\nTry again, or send /cancel.")
         return
 
     subtasks = parsed["subtasks"]
-    task = Task(
-        id=str(uuid4()),
-        workspace_id=account.workspace_id,
-        title=str(parsed["title"]),
-        date=parsed["date"],
-        time=str(parsed["time"]),
-        end_time=str(parsed["end_time"]),
-        # The website schema still requires a value; Telegram no longer exposes activity categories.
-        category="Personal",
-        completed=False,
-    )
+    is_edit = task is not None
+    if task is None:
+        task = Task(
+            id=str(uuid4()),
+            workspace_id=account.workspace_id,
+            title=str(parsed["title"]),
+            date=parsed["date"],
+            time=str(parsed["time"]),
+            end_time=str(parsed["end_time"]),
+            # The website schema still requires a value; Telegram no longer exposes activity categories.
+            category="Personal",
+            completed=False,
+        )
+        db.add(task)
+    else:
+        task.title = str(parsed["title"])
+        task.date = parsed["date"]
+        task.time = str(parsed["time"])
+        task.end_time = str(parsed["end_time"])
     task.subtasks = [
         TaskSubtask(
             id=str(uuid4()),
@@ -519,12 +541,11 @@ def _save_quick_activity(db: Session, account: TelegramAccount, value: str) -> N
         )
         for index, title in enumerate(subtasks)
     ]
-    db.add(task)
     _clear_state(account)
     send_message(
         account.chat_id,
         (
-            "✅ <b>Activity saved to Daymark</b>\n"
+            f"✅ <b>Activity {'updated in' if is_edit else 'saved to'} Daymark</b>\n"
             f"{_escape(task.title)}\n"
             f"{_escape(_friendly_date(task.date))} · {task.time}–{task.end_time}\n"
             + (
@@ -543,6 +564,20 @@ def _handle_state_text(db: Session, account: TelegramAccount, text_value: str) -
 
     if account.state == "task_quick":
         _save_quick_activity(db, account, value)
+        return
+
+    if account.state == "task_edit":
+        task_id = str(data.get("task_id", ""))
+        task = db.scalar(
+            select(Task)
+            .options(selectinload(Task.subtasks))
+            .where(Task.id == task_id, Task.workspace_id == account.workspace_id)
+        )
+        if task is None:
+            _clear_state(account)
+            send_message(account.chat_id, "That activity no longer exists.", _home_keyboard())
+            return
+        _save_quick_activity(db, account, value, task)
         return
 
     if account.state == "task_title":
@@ -655,6 +690,72 @@ def _handle_callback(db: Session, callback: dict) -> None:
     if data_value.startswith("menu:"):
         _answer_callback(callback_id)
         _run_action(db, account, data_value.split(":", 1)[1])
+        return
+
+    if data_value.startswith("task:"):
+        parts = data_value.split(":", 2)
+        if len(parts) != 3:
+            _answer_callback(callback_id, "Invalid activity action")
+            return
+        action, task_id = parts[1], parts[2]
+        task = db.scalar(
+            select(Task)
+            .options(selectinload(Task.subtasks))
+            .where(Task.id == task_id, Task.workspace_id == account.workspace_id)
+        )
+        if task is None:
+            _answer_callback(callback_id, "Activity not found")
+            return
+
+        if action == "edit":
+            _set_state(account, "task_edit", {"task_id": task.id})
+            current_value = f"{task.time}-{task.end_time} {task.title}"
+            if task.subtasks:
+                current_value += " | " + ", ".join(item.title for item in task.subtasks)
+            _answer_callback(callback_id, "Edit activity")
+            send_message(
+                account.chat_id,
+                (
+                    "✏️ <b>Edit activity — one step</b>\n\n"
+                    "Send the complete replacement in the same format:\n"
+                    f"<code>{_escape(current_value)}</code>\n\n"
+                    "Changing the time also updates its future reminder. Send /cancel to keep it unchanged."
+                ),
+            )
+            return
+
+        if action == "delete":
+            _answer_callback(callback_id)
+            send_message(
+                account.chat_id,
+                (
+                    "🗑️ <b>Delete this activity?</b>\n\n"
+                    f"<b>{_escape(task.title)}</b>\n"
+                    f"<code>{task.time}–{task.end_time}</code>\n\n"
+                    "This also removes its subtasks."
+                ),
+                _inline_keyboard(
+                    [[
+                        ("Delete permanently", f"task:delete_confirm:{task.id}"),
+                        ("Keep activity", f"task:delete_cancel:{task.id}"),
+                    ]]
+                ),
+            )
+            return
+
+        if action == "delete_confirm":
+            db.delete(task)
+            db.flush()
+            _clear_state(account)
+            _answer_callback(callback_id, "Activity deleted")
+            _show_today(db, account)
+            return
+
+        if action == "delete_cancel":
+            _answer_callback(callback_id, "Activity kept")
+            return
+
+        _answer_callback(callback_id, "Unknown activity action")
         return
 
     if data_value.startswith("task_date:"):
