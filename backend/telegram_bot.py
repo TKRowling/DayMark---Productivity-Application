@@ -7,7 +7,7 @@ import hmac
 import json
 import os
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as clock_time, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -31,6 +31,7 @@ DEFAULT_WORKSPACE_ID = "tkrowling-dashboard"
 DEFAULT_TIMEZONE = "Asia/Bangkok"
 CATEGORIES = ("Personal", "Study", "Scholarship", "Fitness", "Wellness")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+TASK_REMINDER_LOOKBACK_MINUTES = 10
 
 BOT_COMMANDS = [
     {"command": "today", "description": "Show today's activities"},
@@ -733,7 +734,10 @@ def _record_notification(db: Session, account: TelegramAccount, dedupe_key: str)
 
 
 def _send_daily_summary(db: Session, account: TelegramAccount) -> bool:
-    today = _today_for(account)
+    now = _now_for(account)
+    if now.hour != 7:
+        return False
+    today = now.date()
     dedupe_key = f"daily:{account.chat_id}:{today.isoformat()}"
     if _notification_exists(db, dedupe_key):
         return False
@@ -751,6 +755,132 @@ def _send_daily_summary(db: Session, account: TelegramAccount) -> bool:
     return True
 
 
+def _task_start(task: Task, account: TelegramAccount) -> datetime | None:
+    if not TIME_PATTERN.fullmatch(task.time):
+        return None
+    hour, minute = (int(part) for part in task.time.split(":", 1))
+    return datetime.combine(task.date, clock_time(hour=hour, minute=minute), _zone(account.timezone))
+
+
+def _send_task_reminders(db: Session, account: TelegramAccount) -> int:
+    now = _now_for(account).replace(second=0, microsecond=0)
+    window_start = now - timedelta(minutes=TASK_REMINDER_LOOKBACK_MINUTES)
+    tasks = list(
+        db.scalars(
+            select(Task)
+            .options(selectinload(Task.subtasks))
+            .where(
+                Task.workspace_id == account.workspace_id,
+                Task.date == now.date(),
+                Task.completed.is_(False),
+            )
+            .order_by(Task.time, Task.title)
+        ).all()
+    )
+
+    sent = 0
+    for task in tasks:
+        starts_at = _task_start(task, account)
+        if starts_at is None or not window_start <= starts_at <= now:
+            continue
+        dedupe_key = (
+            f"task-start:{account.chat_id}:{task.id}:{task.date.isoformat()}:{task.time}"
+        )
+        if _notification_exists(db, dedupe_key):
+            continue
+
+        timing = f"{task.time}–{task.end_time}" if task.end_time else task.time
+        lines = [
+            "⏰ <b>ACTIVITY STARTING NOW</b>",
+            "",
+            f"<code>{_escape(timing)}</code>  <b>{_escape(task.title)}</b>",
+            f"Category: {_escape(task.category)}",
+        ]
+        if task.subtasks:
+            lines.extend(["", "<b>What to do</b>"])
+            lines.extend(
+                f"{'✅' if subtask.done else '▫️'} {_escape(subtask.title)}"
+                for subtask in task.subtasks[:10]
+            )
+        send_message(
+            account.chat_id,
+            "\n".join(lines),
+            _inline_keyboard([[('✅ Complete activity', f"done:t:{task.id}")]]),
+        )
+        _record_notification(db, account, dedupe_key)
+        sent += 1
+    return sent
+
+
+def _end_of_day_target(now: datetime) -> date | None:
+    if now.hour == 23 and now.minute >= 58:
+        return now.date()
+    if now.hour == 0 and now.minute <= 10:
+        return now.date() - timedelta(days=1)
+    return None
+
+
+def _send_end_of_day_report(db: Session, account: TelegramAccount) -> bool:
+    report_date = _end_of_day_target(_now_for(account))
+    if report_date is None:
+        return False
+
+    dedupe_key = f"end-of-day:{account.chat_id}:{report_date.isoformat()}"
+    if _notification_exists(db, dedupe_key):
+        return False
+
+    tasks = list(
+        db.scalars(
+            select(Task)
+            .where(Task.workspace_id == account.workspace_id, Task.date == report_date)
+            .order_by(Task.time, Task.title)
+        ).all()
+    )
+    missions = list(
+        db.scalars(
+            select(Mission)
+            .options(selectinload(Mission.completions))
+            .where(Mission.workspace_id == account.workspace_id, Mission.date <= report_date)
+            .order_by(Mission.title)
+        ).all()
+    )
+    completed_tasks = [task for task in tasks if task.completed]
+    completed_missions = [
+        mission
+        for mission in missions
+        if any(item.completed_on == report_date for item in mission.completions)
+    ]
+    completed_count = len(completed_tasks) + len(completed_missions)
+    total_count = len(tasks) + len(missions)
+    score = round((completed_count / total_count) * 100) if total_count else 0
+
+    lines = [
+        f"🌙 <b>END-OF-DAY REPORT — {_escape(_friendly_date(report_date))}</b>",
+        "",
+        f"<b>TOTAL POINTS: {score} / 100</b>",
+        f"Completed {completed_count} of {total_count} objectives",
+        "",
+        f"<b>Activities completed ({len(completed_tasks)}/{len(tasks)})</b>",
+    ]
+    if completed_tasks:
+        lines.extend(f"✅ {_escape(task.title)}" for task in completed_tasks)
+    else:
+        lines.append("No activities completed today.")
+
+    lines.extend(["", f"<b>Missions completed ({len(completed_missions)}/{len(missions)})</b>"])
+    if completed_missions:
+        lines.extend(
+            f"✅ {_escape(mission.title)} · +{mission.xp} XP"
+            for mission in completed_missions
+        )
+    else:
+        lines.append("No missions completed today.")
+
+    send_message(account.chat_id, "\n".join(lines), _home_keyboard())
+    _record_notification(db, account, dedupe_key)
+    return True
+
+
 def run_notifications(db: Session) -> dict[str, int]:
     accounts = list(
         db.scalars(
@@ -758,9 +888,15 @@ def run_notifications(db: Session) -> dict[str, int]:
         ).all()
     )
     summaries = 0
+    task_reminders = 0
+    end_of_day_reports = 0
     for account in accounts:
         summaries += int(_send_daily_summary(db, account))
+        task_reminders += _send_task_reminders(db, account)
+        end_of_day_reports += int(_send_end_of_day_report(db, account))
     return {
         "accounts": len(accounts),
         "daily_summaries": summaries,
+        "task_reminders": task_reminders,
+        "end_of_day_reports": end_of_day_reports,
     }

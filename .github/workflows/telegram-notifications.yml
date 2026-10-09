@@ -1,0 +1,34 @@
+name: Telegram notification scheduler
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+    - cron: "59 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: daymark-telegram-notifications
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Request signed GitHub identity and run notifications
+        shell: bash
+        run: |
+          oidc_token="$(
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=daymark-telegram-scheduler" \
+            | jq -r '.value'
+          )"
+          echo "::add-mask::${oidc_token}"
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${oidc_token}" \
+            https://daymark-productivity-mu.vercel.app/api/telegram/cron

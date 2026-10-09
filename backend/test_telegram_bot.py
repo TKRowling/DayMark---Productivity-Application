@@ -1,9 +1,11 @@
 import os
 import tempfile
 import unittest
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -113,6 +115,7 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(dashboard.status_code, 200)
         payload = dashboard.json()
+        activity_date = date.fromisoformat(payload["tasks"][0]["date"])
         self.assertEqual(len(payload["tasks"]), 1)
         self.assertEqual(payload["tasks"][0]["time"], "20:00")
         self.assertEqual(payload["tasks"][0]["end_time"], "21:00")
@@ -165,17 +168,71 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(first_today.json()["status"], "processed")
         self.assertEqual(duplicate_today.json()["status"], "duplicate")
 
-        first_cron = self.client.get(
+        unauthorized_cron = self.client.get(
             "/api/telegram/cron",
-            headers={"Authorization": "Bearer test-cron-secret"},
+            headers={"Authorization": "Bearer wrong"},
         )
-        second_cron = self.client.get(
-            "/api/telegram/cron",
-            headers={"Authorization": "Bearer test-cron-secret"},
+        self.assertEqual(unauthorized_cron.status_code, 401)
+
+        reminder_time = datetime(
+            activity_date.year,
+            activity_date.month,
+            activity_date.day,
+            20,
+            2,
+            tzinfo=ZoneInfo("Asia/Bangkok"),
         )
-        self.assertEqual(first_cron.status_code, 200)
-        self.assertEqual(first_cron.json()["daily_summaries"], 1)
-        self.assertEqual(second_cron.json()["daily_summaries"], 0)
+        with patch("telegram_bot._now_for", return_value=reminder_time):
+            first_reminder = self.client.get(
+                "/api/telegram/cron",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+            reminder_message = self.outbound[-1][1]["text"]
+            duplicate_reminder = self.client.get(
+                "/api/telegram/cron",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+        self.assertEqual(first_reminder.status_code, 200)
+        self.assertEqual(first_reminder.json()["task_reminders"], 1)
+        self.assertIn("ACTIVITY STARTING NOW", reminder_message)
+        self.assertIn("20:00–21:00", reminder_message)
+        self.assertEqual(duplicate_reminder.json()["task_reminders"], 0)
+
+        completed_activity = self.telegram_update(17, callback=activity_callbacks[0])
+        completed_mission = self.telegram_update(18, callback=mission_callbacks[0])
+        self.assertEqual(completed_activity.status_code, 200)
+        self.assertEqual(completed_mission.status_code, 200)
+
+        morning_time = reminder_time.replace(hour=7, minute=2)
+        with patch("telegram_bot._now_for", return_value=morning_time):
+            first_morning = self.client.get(
+                "/api/telegram/cron",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+            duplicate_morning = self.client.get(
+                "/api/telegram/cron",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+        self.assertEqual(first_morning.json()["daily_summaries"], 1)
+        self.assertEqual(duplicate_morning.json()["daily_summaries"], 0)
+
+        report_time = reminder_time.replace(hour=23, minute=59)
+        with patch("telegram_bot._now_for", return_value=report_time):
+            first_report = self.client.get(
+                "/api/telegram/cron",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+            report_message = self.outbound[-1][1]["text"]
+            duplicate_report = self.client.get(
+                "/api/telegram/cron",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+        self.assertEqual(first_report.json()["end_of_day_reports"], 1)
+        self.assertIn("END-OF-DAY REPORT", report_message)
+        self.assertIn("TOTAL POINTS: 100 / 100", report_message)
+        self.assertIn("Evening training", report_message)
+        self.assertIn("Drink enough water", report_message)
+        self.assertEqual(duplicate_report.json()["end_of_day_reports"], 0)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from database import Base, engine, get_db
 from migrations import run_schema_migrations
 from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, TaskSubtask, TelegramAccount, TelegramUpdate, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema, WeightSchema
+from scheduler_auth import SchedulerAuthorizationError, authorize_notification_scheduler
 from telegram_bot import TelegramError, bot_identity, configure_webhook, handle_update, run_notifications
 
 
@@ -32,7 +33,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Daymark API",
     description="Persistence API for missions, tasks, scholarships, weight tracking, workouts, and meals.",
-    version="1.6.0",
+    version="1.7.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -467,7 +468,10 @@ def telegram_cron(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    require_bearer_secret(authorization, "CRON_SECRET")
+    try:
+        authorize_notification_scheduler(authorization)
+    except SchedulerAuthorizationError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
     try:
         result = run_notifications(db)
     except TelegramError as error:

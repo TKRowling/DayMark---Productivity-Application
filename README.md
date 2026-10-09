@@ -57,7 +57,7 @@ The production backend intentionally returns a configuration error when `DATABAS
 
 ## Telegram bot
 
-The FastAPI service includes a private Telegram integration for activities and daily missions. Today's activities are date-specific and shown on their own screen, while fixed missions repeat every day on a separate mission screen. The bot supports guided activity creation with 24-hour start/end times and subtasks, repeating mission creation with 1/3/5/10 XP, separate completion buttons, and separate daily briefing messages. Conversation state is stored in PostgreSQL so a serverless restart does not interrupt an in-progress form.
+The FastAPI service includes a private Telegram integration for activities and daily missions. Today's activities are date-specific and shown on their own screen, while fixed missions repeat every day on a separate mission screen. The bot supports guided activity creation with 24-hour start/end times and subtasks, repeating mission creation with 1/3/5/10 XP, separate completion buttons, start-time activity reminders, separate morning briefing messages, and a 23:59 completion report scored out of 100. Conversation and notification state is stored in PostgreSQL so serverless restarts do not interrupt forms or resend the same alert.
 
 Create these Vercel environment variables before activating the bot:
 
@@ -78,4 +78,4 @@ https://t.me/tkr_daymark_bot?start=<TELEGRAM_LINK_CODE>
 
 The first successfully linked private chat becomes the owner of the configured Daymark workspace. Later attempts to link another Telegram account are rejected. Telegram must be able to reach the webhook without an interactive Vercel login; keep the website protected only if the webhook is hosted on a separate public backend.
 
-The included Vercel Cron schedule runs at `00:00 UTC`, approximately `07:00 Asia/Bangkok`. Vercel Hobby may invoke it at any point during that hour. Exact per-activity reminders require a higher-frequency scheduler and are intentionally not claimed by this configuration.
+The Vercel Cron schedule remains as a daily morning fallback. Because Vercel Hobby only supports daily cron jobs, `.github/workflows/telegram-notifications.yml` securely invokes the same idempotent endpoint every five minutes using a short-lived GitHub OIDC identity token. It also requests a dedicated run at `16:59 UTC` (`23:59 Asia/Bangkok`) for the end-of-day report. GitHub may queue scheduled workflows, so an activity reminder can occasionally arrive a few minutes after its configured start time.
