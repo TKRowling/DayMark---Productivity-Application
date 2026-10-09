@@ -1,5 +1,6 @@
 import os
 import re
+import hmac
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
@@ -12,8 +13,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from database import Base, engine, get_db
 from migrations import run_schema_migrations
-from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, TaskSubtask, WeightEntry, Workout
+from models import Meal, Mission, MissionCompletion, ScholarshipEntry, ScholarshipRequirement, Task, TaskSubtask, TelegramAccount, TelegramUpdate, WeightEntry, Workout
 from schemas import DashboardResponse, DashboardSchema, WeightSchema
+from telegram_bot import TelegramError, bot_identity, configure_webhook, handle_update, run_notifications
 
 
 WORKSPACE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -30,7 +32,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Daymark API",
     description="Persistence API for missions, tasks, scholarships, weight tracking, workouts, and meals.",
-    version="1.5.0",
+    version="1.6.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -46,7 +48,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Workspace-ID"],
 )
 
@@ -59,6 +61,15 @@ def workspace_id(x_workspace_id: str = Header(..., alias="X-Workspace-ID")) -> s
 
 def new_id() -> str:
     return str(uuid4())
+
+
+def require_bearer_secret(authorization: str | None, environment_name: str) -> None:
+    expected = os.getenv(environment_name, "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail=f"{environment_name} is not configured")
+    supplied = (authorization or "").removeprefix("Bearer ").strip()
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Invalid authorization")
 
 
 def seed_dashboard() -> DashboardSchema:
@@ -372,3 +383,94 @@ def delete_weight(
         raise HTTPException(status_code=404, detail="Weight check-in not found")
     db.commit()
     return Response(status_code=204)
+
+
+@app.get("/api/telegram/status")
+def telegram_status(
+    workspace: str = Depends(workspace_id),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    account = db.scalar(
+        select(TelegramAccount).where(TelegramAccount.workspace_id == workspace).limit(1)
+    )
+    return {
+        "configured": bool(
+            os.getenv("TELEGRAM_BOT_TOKEN")
+            and os.getenv("TELEGRAM_WEBHOOK_SECRET")
+            and (os.getenv("TELEGRAM_LINK_CODE") or os.getenv("TELEGRAM_ALLOWED_CHAT_ID"))
+        ),
+        "linked": account is not None,
+        "bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "tkr_daymark_bot"),
+        "notifications_enabled": account.notifications_enabled if account else False,
+        "timezone": account.timezone if account else os.getenv("DAYMARK_TIMEZONE", "Asia/Bangkok"),
+    }
+
+
+@app.post("/api/telegram/setup")
+def setup_telegram(
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    require_bearer_secret(authorization, "CRON_SECRET")
+    webhook_url = os.getenv(
+        "TELEGRAM_WEBHOOK_URL",
+        "https://daymark-productivity-mu.vercel.app/api/telegram/webhook",
+    ).strip()
+    try:
+        setup = configure_webhook(webhook_url)
+        identity = bot_identity()
+    except TelegramError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return {
+        "status": "configured",
+        "webhook_url": webhook_url,
+        "bot_id": identity.get("id"),
+        "bot_username": identity.get("username"),
+        **setup,
+    }
+
+
+@app.post("/api/telegram/webhook", include_in_schema=False)
+def telegram_webhook(
+    update: dict,
+    x_telegram_bot_api_secret_token: str | None = Header(
+        default=None,
+        alias="X-Telegram-Bot-Api-Secret-Token",
+    ),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    expected = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="TELEGRAM_WEBHOOK_SECRET is not configured")
+    if not x_telegram_bot_api_secret_token or not hmac.compare_digest(
+        x_telegram_bot_api_secret_token,
+        expected,
+    ):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
+
+    update_id = update.get("update_id")
+    if not isinstance(update_id, int):
+        raise HTTPException(status_code=400, detail="Telegram update_id is required")
+    if db.get(TelegramUpdate, update_id) is not None:
+        return {"status": "duplicate"}
+
+    try:
+        handle_update(db, update)
+    except TelegramError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    db.add(TelegramUpdate(update_id=update_id))
+    db.commit()
+    return {"status": "processed"}
+
+
+@app.get("/api/telegram/cron", include_in_schema=False)
+def telegram_cron(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    require_bearer_secret(authorization, "CRON_SECRET")
+    try:
+        result = run_notifications(db)
+    except TelegramError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    db.commit()
+    return {"status": "ok", **result}

@@ -16,6 +16,10 @@ The API exposes:
 - `GET /api/health`
 - `GET /api/dashboard`
 - `PUT /api/dashboard`
+- `PUT /api/weights`
+- `DELETE /api/weights/{entry_id}`
+- `GET /api/telegram/status`
+- `POST /api/telegram/setup`
 - `GET /api/docs` for interactive OpenAPI documentation
 
 Dashboard requests include a locally generated `X-Workspace-ID` header. This separates anonymous workspaces, but it is not a substitute for authentication if the app will hold sensitive or multi-user data.
@@ -50,3 +54,28 @@ To run the services separately, use `npm run dev:web` and `npm run dev:api` in d
 5. Deploy. Vercel uses `vercel.json` to serve Vite at `/` and FastAPI at `/api`.
 
 The production backend intentionally returns a configuration error when `DATABASE_URL` is missing instead of storing data on Vercel's temporary filesystem.
+
+## Telegram bot
+
+The FastAPI service includes a private Telegram integration for activities and daily missions. It supports guided activity creation with 24-hour start/end times and subtasks, repeating mission creation with 1/3/5/10 XP, today's plan, completion buttons, and a daily briefing. Conversation state is stored in PostgreSQL so a serverless restart does not interrupt an in-progress form.
+
+Create these Vercel environment variables before activating the bot:
+
+- `TELEGRAM_BOT_TOKEN`: token issued by `@BotFather`; store this as a secret.
+- `TELEGRAM_WEBHOOK_SECRET`: random letters, numbers, `_`, or `-`; store this as a secret.
+- `TELEGRAM_LINK_CODE`: a random owner-only code used once to link the private bot; store this as a secret.
+- `CRON_SECRET`: random secret used by Vercel Cron and the setup endpoint.
+- `TELEGRAM_BOT_USERNAME`: `tkr_daymark_bot`.
+- `TELEGRAM_WEBHOOK_URL`: `https://daymark-productivity-mu.vercel.app/api/telegram/webhook`.
+- `DAYMARK_WORKSPACE_ID`: `tkrowling-dashboard`.
+- `DAYMARK_TIMEZONE`: `Asia/Bangkok`.
+
+After redeploying, call `POST /api/telegram/setup` with `Authorization: Bearer <CRON_SECRET>`. This registers the webhook and the bot command menu without exposing the bot token. The owner then opens:
+
+```text
+https://t.me/tkr_daymark_bot?start=<TELEGRAM_LINK_CODE>
+```
+
+The first successfully linked private chat becomes the owner of the configured Daymark workspace. Later attempts to link another Telegram account are rejected. Telegram must be able to reach the webhook without an interactive Vercel login; keep the website protected only if the webhook is hosted on a separate public backend.
+
+The included Vercel Cron schedule runs at `00:00 UTC`, approximately `07:00 Asia/Bangkok`. Vercel Hobby may invoke it at any point during that hour. Exact per-activity reminders require a higher-frequency scheduler and are intentionally not claimed by this configuration.

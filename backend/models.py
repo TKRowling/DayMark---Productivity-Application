@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -170,3 +170,44 @@ class Meal(Base):
     title: Mapped[str] = mapped_column(String(240))
     detail: Mapped[str] = mapped_column(String(500), default="")
     calories: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TelegramAccount(Base):
+    __tablename__ = "telegram_accounts"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    display_name: Mapped[str] = mapped_column(String(160), default="")
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Bangkok")
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    reminder_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    state: Mapped[str] = mapped_column(String(50), default="")
+    state_data: Mapped[str] = mapped_column(Text, default="{}")
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TelegramUpdate(Base):
+    __tablename__ = "telegram_updates"
+
+    update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TelegramNotification(Base):
+    __tablename__ = "telegram_notifications"
+
+    dedupe_key: Mapped[str] = mapped_column(String(240), primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )

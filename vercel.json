@@ -11,6 +11,12 @@
       "framework": "fastapi"
     }
   },
+  "crons": [
+    {
+      "path": "/api/telegram/cron",
+      "schedule": "0 0 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
