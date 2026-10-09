@@ -1,4 +1,4 @@
-"""Private Telegram workflows for Daymark activities and daily missions."""
+"""Private Telegram workflows for Daymark activities, missions, and weight tracking."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from models import (
     TaskSubtask,
     TelegramAccount,
     TelegramNotification,
+    WeightEntry,
 )
 from schemas import MISSION_XP_VALUES
 
@@ -36,6 +37,7 @@ QUICK_ACTIVITY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TASK_REMINDER_LOOKBACK_MINUTES = 10
+WEIGHT_GOAL_KG = 75.0
 
 BOT_COMMANDS = [
     {"command": "today", "description": "Show today's activities"},
@@ -44,6 +46,8 @@ BOT_COMMANDS = [
     {"command": "addmission", "description": "Add a repeating daily mission"},
     {"command": "done", "description": "Complete today's activity"},
     {"command": "missiondone", "description": "Complete today's mission"},
+    {"command": "weight", "description": "Show weight progress"},
+    {"command": "addweight", "description": "Log or update a weight check-in"},
     {"command": "settings", "description": "Manage Telegram reminders"},
     {"command": "cancel", "description": "Cancel the current form"},
     {"command": "help", "description": "Show available commands"},
@@ -149,6 +153,7 @@ def _home_keyboard() -> dict:
             [("📅 Today's activities", "menu:today"), ("⚔️ Daily missions", "menu:missions")],
             [("➕ Add activity", "menu:addtask"), ("➕ Add mission", "menu:addmission")],
             [("✅ Complete activity", "menu:done"), ("✅ Complete mission", "menu:missiondone")],
+            [("⚖️ Weight tracking", "menu:weight")],
             [("⚙️ Reminder settings", "menu:settings")],
         ]
     )
@@ -247,7 +252,7 @@ def _welcome(account: TelegramAccount) -> None:
         (
             f"<b>DAYMARK SYSTEM ONLINE</b>\n\nWelcome, <b>{name}</b>. "
             "This private bot is linked to your Daymark workspace. Add activities, manage daily missions, "
-            "complete objectives, and receive reminders from here."
+            "track your weight, complete objectives, and receive reminders from here."
         ),
         _home_keyboard(),
     )
@@ -264,6 +269,8 @@ def _help(account: TelegramAccount) -> None:
             "/addmission — add a repeating daily mission\n"
             "/done — complete one of today's activities\n"
             "/missiondone — complete a fixed mission for today\n"
+            "/weight — show your weight progress and recent check-ins\n"
+            "/addweight — log or update one weight check-in\n"
             "/settings — manage reminders\n"
             "/cancel — cancel the current form"
         ),
@@ -359,6 +366,54 @@ def _show_missions(db: Session, account: TelegramAccount) -> None:
     )
 
 
+def _weight_entries(db: Session, account: TelegramAccount) -> list[WeightEntry]:
+    return list(
+        db.scalars(
+            select(WeightEntry)
+            .where(WeightEntry.workspace_id == account.workspace_id)
+            .order_by(WeightEntry.date)
+        ).all()
+    )
+
+
+def _weight_text(db: Session, account: TelegramAccount) -> str:
+    entries = _weight_entries(db, account)
+    if not entries:
+        return (
+            "<b>WEIGHT TRACKING</b>\n\n"
+            "No check-ins yet. Log your first weight to begin tracking your trend."
+        )
+
+    first = entries[0]
+    current = entries[-1]
+    change = current.value - first.value
+    change_text = f"{change:+.1f} kg" if change else "0.0 kg"
+    remaining = max(0.0, current.value - WEIGHT_GOAL_KG)
+    lines = [
+        "<b>WEIGHT TRACKING</b>",
+        "",
+        f"Current: <b>{current.value:.1f} kg</b>",
+        f"Started: {first.value:.1f} kg · {_escape(_friendly_date(first.date))}",
+        f"Total change: <b>{change_text}</b>",
+        f"To {WEIGHT_GOAL_KG:.0f} kg goal: <b>{remaining:.1f} kg</b>",
+        "",
+        "<b>Recent check-ins</b>",
+    ]
+    for entry in reversed(entries[-10:]):
+        lines.append(f"• {_escape(_friendly_date(entry.date))} · <b>{entry.value:.1f} kg</b>")
+    return "\n".join(lines)
+
+
+def _show_weight(db: Session, account: TelegramAccount) -> None:
+    entries = _weight_entries(db, account)
+    rows = [
+        [(f"🗑️ {entry.date.strftime('%d %b')} · {entry.value:.1f} kg", f"weight:delete:{entry.id}")]
+        for entry in reversed(entries[-5:])
+    ]
+    rows.append([("➕ Log / update weight", "menu:addweight")])
+    send_message(account.chat_id, _weight_text(db, account), _inline_keyboard(rows))
+
+
 def _show_completable(db: Session, account: TelegramAccount, kind: str) -> None:
     rows: list[list[tuple[str, str]]] = []
     if kind == "task":
@@ -422,6 +477,21 @@ def _begin_mission(account: TelegramAccount) -> None:
     send_message(account.chat_id, "<b>Add daily mission — 1/3</b>\nWhat is the repeating mission?\n\nSend the title, or /cancel.")
 
 
+def _begin_weight(account: TelegramAccount) -> None:
+    _set_state(account, "weight_quick")
+    send_message(
+        account.chat_id,
+        (
+            "<b>Log weight — one step</b>\n\n"
+            "Send your weight in kilograms:\n"
+            "<code>84.2</code>\n\n"
+            "For another date:\n"
+            "<code>84.2 | yesterday</code> or <code>84.2 | 2026-10-08</code>\n\n"
+            "Logging the same date again updates that check-in. Send /cancel to stop."
+        ),
+    )
+
+
 def _run_action(db: Session, account: TelegramAccount, action: str) -> None:
     if action == "today":
         _clear_state(account)
@@ -435,6 +505,11 @@ def _run_action(db: Session, account: TelegramAccount, action: str) -> None:
     elif action == "missiondone":
         _clear_state(account)
         _show_completable(db, account, "mission")
+    elif action == "weight":
+        _clear_state(account)
+        _show_weight(db, account)
+    elif action == "addweight":
+        _begin_weight(account)
     elif action == "addtask":
         _begin_task(account)
     elif action == "addmission":
@@ -558,6 +633,70 @@ def _save_quick_activity(
     )
 
 
+def _parse_weight_check_in(value: str, account: TelegramAccount) -> tuple[float | None, date | None, str]:
+    parts = [part.strip() for part in value.split("|")]
+    if not parts or len(parts) > 2:
+        return None, None, "Use <code>84.2</code> or <code>84.2 | YYYY-MM-DD</code>."
+
+    number_text = parts[0].lower().removesuffix("kg").strip().replace(",", ".")
+    try:
+        weight = round(float(number_text), 1)
+    except ValueError:
+        return None, None, "Send a numeric weight, for example <code>84.2</code>."
+    if not 20 <= weight <= 400:
+        return None, None, "Weight must be between 20 and 400 kg."
+
+    check_in_date = _today_for(account)
+    if len(parts) == 2 and parts[1]:
+        date_text = parts[1].lower()
+        if date_text == "today":
+            check_in_date = _today_for(account)
+        elif date_text == "yesterday":
+            check_in_date = _today_for(account) - timedelta(days=1)
+        elif parsed_date := _valid_date(parts[1]):
+            check_in_date = parsed_date
+        else:
+            return None, None, "Use <code>today</code>, <code>yesterday</code>, or <code>YYYY-MM-DD</code>."
+    return weight, check_in_date, ""
+
+
+def _save_weight_check_in(db: Session, account: TelegramAccount, value: str) -> None:
+    weight, check_in_date, error = _parse_weight_check_in(value, account)
+    if weight is None or check_in_date is None:
+        send_message(account.chat_id, f"{error}\n\nTry again, or send /cancel.")
+        return
+
+    entry = db.scalar(
+        select(WeightEntry).where(
+            WeightEntry.workspace_id == account.workspace_id,
+            WeightEntry.date == check_in_date,
+        )
+    )
+    is_update = entry is not None
+    if entry is None:
+        entry = WeightEntry(
+            id=str(uuid4()),
+            workspace_id=account.workspace_id,
+            date=check_in_date,
+            value=weight,
+        )
+        db.add(entry)
+    else:
+        entry.value = weight
+
+    _clear_state(account)
+    send_message(
+        account.chat_id,
+        (
+            f"✅ <b>Weight {'updated' if is_update else 'saved'}</b>\n"
+            f"{weight:.1f} kg · {_escape(_friendly_date(check_in_date))}"
+        ),
+        _inline_keyboard(
+            [[("⚖️ View weight progress", "menu:weight"), ("➕ Another check-in", "menu:addweight")]]
+        ),
+    )
+
+
 def _handle_state_text(db: Session, account: TelegramAccount, text_value: str) -> None:
     value = text_value.strip()
     data = _state_data(account)
@@ -578,6 +717,10 @@ def _handle_state_text(db: Session, account: TelegramAccount, text_value: str) -
             send_message(account.chat_id, "That activity no longer exists.", _home_keyboard())
             return
         _save_quick_activity(db, account, value, task)
+        return
+
+    if account.state == "weight_quick":
+        _save_weight_check_in(db, account, value)
         return
 
     if account.state == "task_title":
@@ -756,6 +899,53 @@ def _handle_callback(db: Session, callback: dict) -> None:
             return
 
         _answer_callback(callback_id, "Unknown activity action")
+        return
+
+    if data_value.startswith("weight:"):
+        parts = data_value.split(":", 2)
+        if len(parts) != 3:
+            _answer_callback(callback_id, "Invalid weight action")
+            return
+        action, entry_id = parts[1], parts[2]
+        entry = db.scalar(
+            select(WeightEntry).where(
+                WeightEntry.id == entry_id,
+                WeightEntry.workspace_id == account.workspace_id,
+            )
+        )
+        if entry is None:
+            _answer_callback(callback_id, "Check-in not found")
+            return
+
+        if action == "delete":
+            _answer_callback(callback_id)
+            send_message(
+                account.chat_id,
+                (
+                    "🗑️ <b>Delete this weight check-in?</b>\n\n"
+                    f"{entry.value:.1f} kg · {_escape(_friendly_date(entry.date))}"
+                ),
+                _inline_keyboard(
+                    [[
+                        ("Delete permanently", f"weight:delete_confirm:{entry.id}"),
+                        ("Keep check-in", f"weight:delete_cancel:{entry.id}"),
+                    ]]
+                ),
+            )
+            return
+
+        if action == "delete_confirm":
+            db.delete(entry)
+            db.flush()
+            _answer_callback(callback_id, "Weight check-in deleted")
+            _show_weight(db, account)
+            return
+
+        if action == "delete_cancel":
+            _answer_callback(callback_id, "Check-in kept")
+            return
+
+        _answer_callback(callback_id, "Unknown weight action")
         return
 
     if data_value.startswith("task_date:"):

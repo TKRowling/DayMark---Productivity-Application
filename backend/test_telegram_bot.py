@@ -106,6 +106,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         command_names = {item["command"] for item in command_payload["commands"]}
         self.assertIn("missions", command_names)
         self.assertIn("missiondone", command_names)
+        self.assertIn("weight", command_names)
+        self.assertIn("addweight", command_names)
 
         unauthorized = self.client.post(
             "/api/telegram/webhook",
@@ -127,6 +129,25 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             self.telegram_update(7, callback="mission_xp:3"),
         ]
         self.assertTrue(all(response.status_code == 200 for response in steps))
+
+        weight_steps = [
+            self.telegram_update(40, "/addweight"),
+            self.telegram_update(41, "84.4"),
+            self.telegram_update(42, "/addweight"),
+            self.telegram_update(43, "83.9 | today"),
+            self.telegram_update(44, "/weight"),
+        ]
+        self.assertTrue(all(response.status_code == 200 for response in weight_steps))
+        weight_message = self.outbound[-1][1]
+        self.assertIn("WEIGHT TRACKING", weight_message["text"])
+        self.assertIn("Current: <b>83.9 kg</b>", weight_message["text"])
+        self.assertIn("Total change: <b>0.0 kg</b>", weight_message["text"])
+        weight_delete_callback = next(
+            button["callback_data"]
+            for row in weight_message["reply_markup"]["inline_keyboard"]
+            for button in row
+            if button["callback_data"].startswith("weight:delete:")
+        )
         activity_saved_message = next(
             payload["text"]
             for method, payload in self.outbound
@@ -149,6 +170,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(len(payload["tasks"][0]["subtasks"]), 3)
         self.assertEqual(len(payload["missions"]), 1)
         self.assertEqual(payload["missions"][0]["xp"], 3)
+        self.assertEqual(len(payload["weights"]), 1)
+        self.assertEqual(payload["weights"][0]["value"], 83.9)
 
         status = self.client.get(
             "/api/telegram/status",
@@ -308,6 +331,23 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             headers={"X-Workspace-ID": "tkrowling-dashboard"},
         )
         self.assertEqual(dashboard_after_delete.json()["tasks"], [])
+
+        begin_weight_delete = self.telegram_update(45, callback=weight_delete_callback)
+        self.assertEqual(begin_weight_delete.status_code, 200)
+        self.assertIn("Delete this weight check-in?", self.outbound[-1][1]["text"])
+        confirm_weight_delete_callback = next(
+            button["callback_data"]
+            for row in self.outbound[-1][1]["reply_markup"]["inline_keyboard"]
+            for button in row
+            if button["callback_data"].startswith("weight:delete_confirm:")
+        )
+        confirm_weight_delete = self.telegram_update(46, callback=confirm_weight_delete_callback)
+        self.assertEqual(confirm_weight_delete.status_code, 200)
+        dashboard_after_weight_delete = self.client.get(
+            "/api/dashboard",
+            headers={"X-Workspace-ID": "tkrowling-dashboard"},
+        )
+        self.assertEqual(dashboard_after_weight_delete.json()["weights"], [])
 
 
 if __name__ == "__main__":
