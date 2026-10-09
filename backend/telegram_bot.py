@@ -31,6 +31,10 @@ DEFAULT_WORKSPACE_ID = "tkrowling-dashboard"
 DEFAULT_TIMEZONE = "Asia/Bangkok"
 CATEGORIES = ("Personal", "Study", "Scholarship", "Fitness", "Wellness")
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+QUICK_ACTIVITY_PATTERN = re.compile(
+    r"^\s*(\d{1,2}):(\d{2})\s*(?:-|–|—|to)\s*(\d{1,2}):(\d{2})\s*:?\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
 TASK_REMINDER_LOOKBACK_MINUTES = 10
 
 BOT_COMMANDS = [
@@ -256,7 +260,7 @@ def _help(account: TelegramAccount) -> None:
             "<b>Daymark commands</b>\n\n"
             "/today — show only today's dated activities\n"
             "/missions — show fixed missions that repeat every day\n"
-            "/addtask — add an activity with date, 24-hour times, category and subtasks\n"
+            "/addtask — add an activity in one message\n"
             "/addmission — add a repeating daily mission\n"
             "/done — complete one of today's activities\n"
             "/missiondone — complete a fixed mission for today\n"
@@ -384,8 +388,20 @@ def _show_settings(account: TelegramAccount) -> None:
 
 
 def _begin_task(account: TelegramAccount) -> None:
-    _set_state(account, "task_title")
-    send_message(account.chat_id, "<b>Add activity — 1/6</b>\nWhat needs to get done?\n\nSend the activity title, or /cancel.")
+    _set_state(account, "task_quick")
+    send_message(
+        account.chat_id,
+        (
+            "<b>Add activity — one step</b>\n\n"
+            "Send the time and title in one message:\n"
+            "<code>8:00 - 12:00: WORK</code>\n\n"
+            "Optional format:\n"
+            "<code>13:00-15:00 Learning English | Study | tomorrow | Vocabulary, Listening</code>\n\n"
+            "Defaults: <b>today · Personal · no subtasks</b>\n"
+            "Categories: Personal, Study, Scholarship, Fitness, Wellness\n\n"
+            "Send /cancel to stop."
+        ),
+    )
 
 
 def _begin_mission(account: TelegramAccount) -> None:
@@ -427,9 +443,103 @@ def _valid_date(value: str) -> date | None:
         return None
 
 
+def _parse_quick_activity(value: str, account: TelegramAccount) -> tuple[dict[str, object] | None, str]:
+    parts = [part.strip() for part in value.split("|")]
+    match = QUICK_ACTIVITY_PATTERN.fullmatch(parts[0]) if parts else None
+    if match is None:
+        return None, "Use this format: <code>8:00 - 12:00: WORK</code>"
+
+    start_hour, start_minute, end_hour, end_minute = (int(item) for item in match.groups()[:4])
+    if start_hour > 23 or end_hour > 23 or start_minute > 59 or end_minute > 59:
+        return None, "Use valid 24-hour times, for example <code>08:00-12:00</code>."
+    start_time = f"{start_hour:02d}:{start_minute:02d}"
+    end_time = f"{end_hour:02d}:{end_minute:02d}"
+    if end_time <= start_time:
+        return None, "The ending time must be later than the start time on the same day."
+
+    title = match.group(5).strip()
+    if not title or len(title) > 240:
+        return None, "The activity title must be between 1 and 240 characters."
+
+    category = "Personal"
+    task_date = _today_for(account)
+    subtasks: list[str] = []
+    category_names = {item.lower(): item for item in CATEGORIES}
+    for optional_value in parts[1:]:
+        if not optional_value:
+            continue
+        lowered = optional_value.lower()
+        if lowered in category_names:
+            category = category_names[lowered]
+        elif lowered == "today":
+            task_date = _today_for(account)
+        elif lowered == "tomorrow":
+            task_date = _today_for(account) + timedelta(days=1)
+        elif parsed_date := _valid_date(optional_value):
+            task_date = parsed_date
+        else:
+            subtasks.extend(item.strip() for item in optional_value.split(",") if item.strip())
+
+    if len(subtasks) > 20 or any(len(item) > 240 for item in subtasks):
+        return None, "Use at most 20 comma-separated subtasks, each under 240 characters."
+    return {
+        "title": title,
+        "date": task_date,
+        "time": start_time,
+        "end_time": end_time,
+        "category": category,
+        "subtasks": subtasks,
+    }, ""
+
+
+def _save_quick_activity(db: Session, account: TelegramAccount, value: str) -> None:
+    parsed, error = _parse_quick_activity(value, account)
+    if parsed is None:
+        send_message(account.chat_id, f"{error}\n\nTry again, or send /cancel.")
+        return
+
+    subtasks = parsed["subtasks"]
+    task = Task(
+        id=str(uuid4()),
+        workspace_id=account.workspace_id,
+        title=str(parsed["title"]),
+        date=parsed["date"],
+        time=str(parsed["time"]),
+        end_time=str(parsed["end_time"]),
+        category=str(parsed["category"]),
+        completed=False,
+    )
+    task.subtasks = [
+        TaskSubtask(
+            id=str(uuid4()),
+            workspace_id=account.workspace_id,
+            title=title,
+            done=False,
+            position=index,
+        )
+        for index, title in enumerate(subtasks)
+    ]
+    db.add(task)
+    _clear_state(account)
+    send_message(
+        account.chat_id,
+        (
+            "✅ <b>Activity saved to Daymark</b>\n"
+            f"{_escape(task.title)}\n"
+            f"{_escape(_friendly_date(task.date))} · {task.time}–{task.end_time} · {_escape(task.category)}\n"
+            f"Subtasks: {len(subtasks)}"
+        ),
+        _home_keyboard(),
+    )
+
+
 def _handle_state_text(db: Session, account: TelegramAccount, text_value: str) -> None:
     value = text_value.strip()
     data = _state_data(account)
+
+    if account.state == "task_quick":
+        _save_quick_activity(db, account, value)
+        return
 
     if account.state == "task_title":
         if not value or len(value) > 240:

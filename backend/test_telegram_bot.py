@@ -21,6 +21,8 @@ os.environ["DAYMARK_TIMEZONE"] = "Asia/Bangkok"
 
 import database  # noqa: E402
 import main  # noqa: E402
+from models import TelegramAccount  # noqa: E402
+from telegram_bot import _parse_quick_activity  # noqa: E402
 
 
 class TelegramBotIntegrationTest(unittest.TestCase):
@@ -75,6 +77,25 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         )
 
     def test_private_activity_mission_and_notifications_flow(self):
+        sample_account = TelegramAccount(
+            chat_id=999,
+            telegram_user_id=999,
+            workspace_id="sample-workspace",
+            timezone="Asia/Bangkok",
+        )
+        sample_now = datetime(2026, 10, 9, 10, 0, tzinfo=ZoneInfo("Asia/Bangkok"))
+        with patch("telegram_bot._now_for", return_value=sample_now):
+            parsed_sample, sample_error = _parse_quick_activity(
+                "8:00 - 12:00: WORK",
+                sample_account,
+            )
+        self.assertEqual(sample_error, "")
+        self.assertEqual(parsed_sample["time"], "08:00")
+        self.assertEqual(parsed_sample["end_time"], "12:00")
+        self.assertEqual(parsed_sample["title"], "WORK")
+        self.assertEqual(parsed_sample["date"], sample_now.date())
+        self.assertEqual(parsed_sample["category"], "Personal")
+
         setup = self.client.post(
             "/api/telegram/setup",
             headers={"Authorization": "Bearer test-cron-secret"},
@@ -96,16 +117,14 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         steps = [
             self.telegram_update(1, "/start owner-link-code"),
             self.telegram_update(2, "/addtask"),
-            self.telegram_update(3, "Evening training"),
-            self.telegram_update(4, callback="task_date:today"),
-            self.telegram_update(5, "20:00"),
-            self.telegram_update(6, "21:00"),
-            self.telegram_update(7, callback="category:task:Fitness"),
-            self.telegram_update(8, "Warm up, Main workout, Stretch"),
-            self.telegram_update(9, "/addmission"),
-            self.telegram_update(10, "Drink enough water"),
-            self.telegram_update(11, callback="category:mission:Wellness"),
-            self.telegram_update(12, callback="mission_xp:3"),
+            self.telegram_update(
+                3,
+                "20:00 - 21:00: Evening training | Fitness | today | Warm up, Main workout, Stretch",
+            ),
+            self.telegram_update(4, "/addmission"),
+            self.telegram_update(5, "Drink enough water"),
+            self.telegram_update(6, callback="category:mission:Wellness"),
+            self.telegram_update(7, callback="mission_xp:3"),
         ]
         self.assertTrue(all(response.status_code == 200 for response in steps))
 
