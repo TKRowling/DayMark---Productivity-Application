@@ -41,6 +41,7 @@ WEIGHT_GOAL_KG = 75.0
 
 BOT_COMMANDS = [
     {"command": "today", "description": "Show today's activities"},
+    {"command": "tomorrow", "description": "Show tomorrow's activities"},
     {"command": "missions", "description": "Show fixed daily missions"},
     {"command": "addtask", "description": "Plan tomorrow's activity"},
     {"command": "addmission", "description": "Add a repeating daily mission"},
@@ -150,8 +151,9 @@ def _inline_keyboard(rows: list[list[tuple[str, str]]]) -> dict:
 def _home_keyboard() -> dict:
     return _inline_keyboard(
         [
-            [("📅 Today's activities", "menu:today"), ("⚔️ Daily missions", "menu:missions")],
-            [("➕ Add activity", "menu:addtask"), ("➕ Add mission", "menu:addmission")],
+            [("📅 Today's activities", "menu:today"), ("🗓️ Tomorrow's activities", "menu:tomorrow")],
+            [("⚔️ Daily missions", "menu:missions")],
+            [("➕ Plan tomorrow", "menu:addtask"), ("➕ Add mission", "menu:addmission")],
             [("✅ Complete activity", "menu:done"), ("✅ Complete mission", "menu:missiondone")],
             [("⚖️ Weight tracking", "menu:weight")],
             [("⚙️ Reminder settings", "menu:settings")],
@@ -264,6 +266,7 @@ def _help(account: TelegramAccount) -> None:
         (
             "<b>Daymark commands</b>\n\n"
             "/today — show only today's dated activities\n"
+            "/tomorrow — show activities you planned for tomorrow\n"
             "/missions — show fixed missions that repeat every day\n"
             "/addtask — plan tomorrow's activity in one message\n"
             "/addmission — add a repeating daily mission\n"
@@ -278,17 +281,25 @@ def _help(account: TelegramAccount) -> None:
     )
 
 
-def _today_tasks(db: Session, account: TelegramAccount) -> tuple[date, list[Task]]:
-    today = _today_for(account)
-    tasks = list(
+def _tasks_for_date(db: Session, account: TelegramAccount, task_date: date) -> list[Task]:
+    return list(
         db.scalars(
             select(Task)
             .options(selectinload(Task.subtasks))
-            .where(Task.workspace_id == account.workspace_id, Task.date == today)
+            .where(Task.workspace_id == account.workspace_id, Task.date == task_date)
             .order_by(Task.time, Task.title)
         ).all()
     )
-    return today, tasks
+
+
+def _today_tasks(db: Session, account: TelegramAccount) -> tuple[date, list[Task]]:
+    today = _today_for(account)
+    return today, _tasks_for_date(db, account, today)
+
+
+def _tomorrow_tasks(db: Session, account: TelegramAccount) -> tuple[date, list[Task]]:
+    tomorrow = _today_for(account) + timedelta(days=1)
+    return tomorrow, _tasks_for_date(db, account, tomorrow)
 
 
 def _daily_missions(db: Session, account: TelegramAccount) -> tuple[date, list[Mission]]:
@@ -304,9 +315,14 @@ def _daily_missions(db: Session, account: TelegramAccount) -> tuple[date, list[M
     return today, missions
 
 
-def _activities_text(db: Session, account: TelegramAccount) -> str:
-    today, tasks = _today_tasks(db, account)
-    lines = [f"<b>TODAY'S ACTIVITIES — {_escape(_friendly_date(today))}</b>", ""]
+def _activities_text_for_date(
+    db: Session,
+    account: TelegramAccount,
+    task_date: date,
+    heading: str,
+) -> str:
+    tasks = _tasks_for_date(db, account, task_date)
+    lines = [f"<b>{heading} — {_escape(_friendly_date(task_date))}</b>", ""]
     if tasks:
         for task in tasks[:12]:
             marker = "✅" if task.completed else "▫️"
@@ -318,8 +334,19 @@ def _activities_text(db: Session, account: TelegramAccount) -> str:
         if len(tasks) > 12:
             lines.append(f"…and {len(tasks) - 12} more activities on the website.")
     else:
-        lines.append("No activities scheduled for today.")
+        day_label = "tomorrow" if heading.startswith("TOMORROW") else "today"
+        lines.append(f"No activities scheduled for {day_label}.")
     return "\n".join(lines)
+
+
+def _activities_text(db: Session, account: TelegramAccount) -> str:
+    today = _today_for(account)
+    return _activities_text_for_date(db, account, today, "TODAY'S ACTIVITIES")
+
+
+def _tomorrow_activities_text(db: Session, account: TelegramAccount) -> str:
+    tomorrow = _today_for(account) + timedelta(days=1)
+    return _activities_text_for_date(db, account, tomorrow, "TOMORROW'S ACTIVITIES")
 
 
 def _missions_text(db: Session, account: TelegramAccount) -> str:
@@ -347,11 +374,33 @@ def _show_today(db: Session, account: TelegramAccount) -> None:
         for task in tasks[:20]
     ]
     rows.extend(
-        [[("✅ Complete activity", "menu:done")], [("➕ Add activity", "menu:addtask")]]
+        [[("✅ Complete activity", "menu:done")], [("➕ Plan tomorrow", "menu:addtask")]]
     )
     send_message(
         account.chat_id,
         _activities_text(db, account),
+        _inline_keyboard(rows),
+    )
+
+
+def _show_tomorrow(db: Session, account: TelegramAccount) -> None:
+    _, tasks = _tomorrow_tasks(db, account)
+    rows = [
+        [
+            (f"✏️ {task.title[:28]}", f"task:edit:{task.id}"),
+            ("🗑️ Delete", f"task:delete:{task.id}"),
+        ]
+        for task in tasks[:20]
+    ]
+    rows.extend(
+        [
+            [("➕ Plan another for tomorrow", "menu:addtask")],
+            [("📅 Today's activities", "menu:today")],
+        ]
+    )
+    send_message(
+        account.chat_id,
+        _tomorrow_activities_text(db, account),
         _inline_keyboard(rows),
     )
 
@@ -460,12 +509,13 @@ def _begin_task(account: TelegramAccount) -> None:
     send_message(
         account.chat_id,
         (
-            "<b>Add activity — one step</b>\n\n"
+            "<b>Plan tomorrow's activity — one step</b>\n\n"
+            "You are entering it today; Daymark will schedule it for <b>tomorrow</b>.\n\n"
             "Send the time and title in one message:\n"
             "<code>8:00 - 12:00: WORK</code>\n\n"
             "Optional format:\n"
             "<code>20:30-22:30 AI Agent | Data Quality Agent &amp; Fix the Auto Tuning</code>\n\n"
-            "Use commas for more subtasks. The default date is <b>tomorrow</b>. "
+            "Use commas for more subtasks. The activity date is <b>tomorrow</b>. "
             "Add <code>| YYYY-MM-DD</code> for a later date.\n\n"
             "New activities must be planned at least one day ahead.\n\n"
             "Send /cancel to stop."
@@ -497,6 +547,9 @@ def _run_action(db: Session, account: TelegramAccount, action: str) -> None:
     if action == "today":
         _clear_state(account)
         _show_today(db, account)
+    elif action == "tomorrow":
+        _clear_state(account)
+        _show_tomorrow(db, account)
     elif action == "missions":
         _clear_state(account)
         _show_missions(db, account)
@@ -632,6 +685,17 @@ def _save_quick_activity(
         for index, title in enumerate(subtasks)
     ]
     _clear_state(account)
+    follow_up_rows: list[list[tuple[str, str]]] = []
+    if task.date == _today_for(account):
+        follow_up_rows.append([("📅 View today's activities", "menu:today")])
+    elif task.date == _today_for(account) + timedelta(days=1):
+        follow_up_rows.append([("🗓️ View tomorrow's activities", "menu:tomorrow")])
+    follow_up_rows.extend(
+        [
+            [("➕ Plan another for tomorrow", "menu:addtask")],
+            [("🏠 Main menu", "menu:help")],
+        ]
+    )
     send_message(
         account.chat_id,
         (
@@ -644,7 +708,7 @@ def _save_quick_activity(
                 else "\nNo subtasks"
             )
         ),
-        _home_keyboard(),
+        _inline_keyboard(follow_up_rows),
     )
 
 
@@ -905,11 +969,15 @@ def _handle_callback(db: Session, callback: dict) -> None:
             return
 
         if action == "delete_confirm":
+            deleted_date = task.date
             db.delete(task)
             db.flush()
             _clear_state(account)
             _answer_callback(callback_id, "Activity deleted")
-            _show_today(db, account)
+            if deleted_date == _today_for(account) + timedelta(days=1):
+                _show_tomorrow(db, account)
+            else:
+                _show_today(db, account)
             return
 
         if action == "delete_cancel":

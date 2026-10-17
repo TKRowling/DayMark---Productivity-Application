@@ -104,6 +104,7 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(setup.json()["bot_username"], "tkr_daymark_bot")
         command_payload = next(payload for method, payload in self.outbound if method == "setMyCommands")
         command_names = {item["command"] for item in command_payload["commands"]}
+        self.assertIn("tomorrow", command_names)
         self.assertIn("missions", command_names)
         self.assertIn("missiondone", command_names)
         self.assertIn("weight", command_names)
@@ -157,14 +158,21 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             for button in row
             if button["callback_data"].startswith("weight:delete:")
         )
-        activity_saved_message = next(
-            payload["text"]
+        activity_saved_payload = next(
+            payload
             for method, payload in self.outbound
             if method == "sendMessage" and "Activity saved to Daymark" in payload.get("text", "")
         )
+        activity_saved_message = activity_saved_payload["text"]
         self.assertIn("Warm up", activity_saved_message)
         self.assertIn("Main workout", activity_saved_message)
         self.assertNotIn("Personal", activity_saved_message)
+        saved_callbacks = [
+            button["callback_data"]
+            for row in activity_saved_payload["reply_markup"]["inline_keyboard"]
+            for button in row
+        ]
+        self.assertIn("menu:tomorrow", saved_callbacks)
 
         dashboard = self.client.get(
             "/api/dashboard",
@@ -189,6 +197,18 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(payload["missions"][0]["xp"], 3)
         self.assertEqual(len(payload["weights"]), 1)
         self.assertEqual(payload["weights"][0]["value"], 83.9)
+
+        tomorrow = self.telegram_update(11, "/tomorrow")
+        tomorrow_message = self.outbound[-1][1]
+        self.assertEqual(tomorrow.status_code, 200)
+        self.assertIn("TOMORROW'S ACTIVITIES", tomorrow_message["text"])
+        self.assertIn("Evening training", tomorrow_message["text"])
+        tomorrow_callbacks = [
+            button["callback_data"]
+            for row in tomorrow_message["reply_markup"]["inline_keyboard"]
+            for button in row
+        ]
+        self.assertIn("menu:addtask", tomorrow_callbacks)
 
         status = self.client.get(
             "/api/telegram/status",
