@@ -42,7 +42,7 @@ WEIGHT_GOAL_KG = 75.0
 BOT_COMMANDS = [
     {"command": "today", "description": "Show today's activities"},
     {"command": "missions", "description": "Show fixed daily missions"},
-    {"command": "addtask", "description": "Add an activity"},
+    {"command": "addtask", "description": "Plan tomorrow's activity"},
     {"command": "addmission", "description": "Add a repeating daily mission"},
     {"command": "done", "description": "Complete today's activity"},
     {"command": "missiondone", "description": "Complete today's mission"},
@@ -265,7 +265,7 @@ def _help(account: TelegramAccount) -> None:
             "<b>Daymark commands</b>\n\n"
             "/today — show only today's dated activities\n"
             "/missions — show fixed missions that repeat every day\n"
-            "/addtask — add an activity in one message\n"
+            "/addtask — plan tomorrow's activity in one message\n"
             "/addmission — add a repeating daily mission\n"
             "/done — complete one of today's activities\n"
             "/missiondone — complete a fixed mission for today\n"
@@ -465,8 +465,9 @@ def _begin_task(account: TelegramAccount) -> None:
             "<code>8:00 - 12:00: WORK</code>\n\n"
             "Optional format:\n"
             "<code>20:30-22:30 AI Agent | Data Quality Agent &amp; Fix the Auto Tuning</code>\n\n"
-            "Use commas for more subtasks. Add <code>| tomorrow</code> or "
-            "<code>| YYYY-MM-DD</code> when needed. The default date is today.\n\n"
+            "Use commas for more subtasks. The default date is <b>tomorrow</b>. "
+            "Add <code>| YYYY-MM-DD</code> for a later date.\n\n"
+            "New activities must be planned at least one day ahead.\n\n"
             "Send /cancel to stop."
         ),
     )
@@ -531,7 +532,11 @@ def _valid_date(value: str) -> date | None:
         return None
 
 
-def _parse_quick_activity(value: str, account: TelegramAccount) -> tuple[dict[str, object] | None, str]:
+def _parse_quick_activity(
+    value: str,
+    account: TelegramAccount,
+    default_date: date | None = None,
+) -> tuple[dict[str, object] | None, str]:
     parts = [part.strip() for part in value.split("|")]
     match = QUICK_ACTIVITY_PATTERN.fullmatch(parts[0]) if parts else None
     if match is None:
@@ -549,7 +554,7 @@ def _parse_quick_activity(value: str, account: TelegramAccount) -> tuple[dict[st
     if not title or len(title) > 240:
         return None, "The activity title must be between 1 and 240 characters."
 
-    task_date = _today_for(account)
+    task_date = default_date or (_today_for(account) + timedelta(days=1))
     subtasks: list[str] = []
     for optional_value in parts[1:]:
         if not optional_value:
@@ -581,9 +586,19 @@ def _save_quick_activity(
     value: str,
     task: Task | None = None,
 ) -> None:
-    parsed, error = _parse_quick_activity(value, account)
+    parsed, error = _parse_quick_activity(
+        value,
+        account,
+        default_date=task.date if task is not None else None,
+    )
     if parsed is None:
         send_message(account.chat_id, f"{error}\n\nTry again, or send /cancel.")
+        return
+    if task is None and parsed["date"] <= _today_for(account):
+        send_message(
+            account.chat_id,
+            "New activities must be planned at least one day ahead. Use tomorrow or a later date.\n\nTry again, or send /cancel.",
+        )
         return
 
     subtasks = parsed["subtasks"]
@@ -731,8 +746,8 @@ def _handle_state_text(db: Session, account: TelegramAccount, text_value: str) -
         _set_state(account, "task_date", data)
         send_message(
             account.chat_id,
-            "<b>Add activity — 2/6</b>\nChoose a date or send it as <code>YYYY-MM-DD</code>.",
-            _inline_keyboard([[("Today", "task_date:today"), ("Tomorrow", "task_date:tomorrow")]]),
+            "<b>Add activity — 2/6</b>\nChoose tomorrow or send a later date as <code>YYYY-MM-DD</code>.",
+            _inline_keyboard([[("Tomorrow", "task_date:tomorrow")]]),
         )
         return
 
@@ -740,6 +755,9 @@ def _handle_state_text(db: Session, account: TelegramAccount, text_value: str) -
         task_date = _valid_date(value)
         if task_date is None:
             send_message(account.chat_id, "Use <code>YYYY-MM-DD</code>, for example <code>2026-10-10</code>.")
+            return
+        if task_date <= _today_for(account):
+            send_message(account.chat_id, "New activities must be planned for tomorrow or a later date.")
             return
         data["date"] = task_date.isoformat()
         _set_state(account, "task_start", data)
@@ -953,7 +971,10 @@ def _handle_callback(db: Session, callback: dict) -> None:
             _answer_callback(callback_id, "This form has expired")
             return
         choice = data_value.split(":", 1)[1]
-        chosen = _today_for(account) + (timedelta(days=1) if choice == "tomorrow" else timedelta())
+        if choice != "tomorrow":
+            _answer_callback(callback_id, "Choose tomorrow or enter a later date")
+            return
+        chosen = _today_for(account) + timedelta(days=1)
         state = _state_data(account)
         state["date"] = chosen.isoformat()
         _set_state(account, "task_start", state)

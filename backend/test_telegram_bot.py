@@ -1,7 +1,7 @@
 import os
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -93,7 +93,7 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(parsed_sample["time"], "08:00")
         self.assertEqual(parsed_sample["end_time"], "12:00")
         self.assertEqual(parsed_sample["title"], "WORK")
-        self.assertEqual(parsed_sample["date"], sample_now.date())
+        self.assertEqual(parsed_sample["date"], sample_now.date() + timedelta(days=1))
         self.assertNotIn("category", parsed_sample)
 
         setup = self.client.post(
@@ -121,7 +121,7 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             self.telegram_update(2, "/addtask"),
             self.telegram_update(
                 3,
-                "20:00 - 21:00: Evening training | today | Warm up, Main workout, Stretch",
+                "20:00 - 21:00: Evening training | Warm up, Main workout, Stretch",
             ),
             self.telegram_update(4, "/addmission"),
             self.telegram_update(5, "Drink enough water"),
@@ -129,6 +129,15 @@ class TelegramBotIntegrationTest(unittest.TestCase):
             self.telegram_update(7, callback="mission_xp:3"),
         ]
         self.assertTrue(all(response.status_code == 200 for response in steps))
+
+        self.assertEqual(self.telegram_update(8, "/addtask").status_code, 200)
+        same_day_attempt = self.telegram_update(
+            9,
+            "18:00-19:00 Same-day activity | today | This must not be stored",
+        )
+        self.assertEqual(same_day_attempt.status_code, 200)
+        self.assertIn("at least one day ahead", self.outbound[-1][1]["text"])
+        self.assertEqual(self.telegram_update(10, "/cancel").status_code, 200)
 
         weight_steps = [
             self.telegram_update(40, "/addweight"),
@@ -164,6 +173,14 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         payload = dashboard.json()
         activity_date = date.fromisoformat(payload["tasks"][0]["date"])
+        activity_view_time = datetime(
+            activity_date.year,
+            activity_date.month,
+            activity_date.day,
+            10,
+            0,
+            tzinfo=ZoneInfo("Asia/Bangkok"),
+        )
         self.assertEqual(len(payload["tasks"]), 1)
         self.assertEqual(payload["tasks"][0]["time"], "20:00")
         self.assertEqual(payload["tasks"][0]["end_time"], "21:00")
@@ -181,7 +198,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertTrue(status.json()["configured"])
         self.assertTrue(status.json()["linked"])
 
-        first_today = self.telegram_update(13, "/today")
+        with patch("telegram_bot._now_for", return_value=activity_view_time):
+            first_today = self.telegram_update(13, "/today")
         today_message = self.outbound[-1][1]
         self.assertIn("TODAY'S ACTIVITIES", today_message["text"])
         self.assertIn("Evening training", today_message["text"])
@@ -222,7 +240,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertIn("Drink enough water", missions_message["text"])
         self.assertNotIn("Evening training", missions_message["text"])
 
-        activities_to_complete = self.telegram_update(15, "/done")
+        with patch("telegram_bot._now_for", return_value=activity_view_time):
+            activities_to_complete = self.telegram_update(15, "/done")
         activity_callbacks = [
             button["callback_data"]
             for row in self.outbound[-1][1]["reply_markup"]["inline_keyboard"]
@@ -232,7 +251,8 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertTrue(activity_callbacks)
         self.assertTrue(all(value.startswith("done:t:") for value in activity_callbacks))
 
-        missions_to_complete = self.telegram_update(16, "/missiondone")
+        with patch("telegram_bot._now_for", return_value=activity_view_time):
+            missions_to_complete = self.telegram_update(16, "/missiondone")
         mission_callbacks = [
             button["callback_data"]
             for row in self.outbound[-1][1]["reply_markup"]["inline_keyboard"]
@@ -278,8 +298,9 @@ class TelegramBotIntegrationTest(unittest.TestCase):
         self.assertNotIn("Category:", reminder_message)
         self.assertEqual(duplicate_reminder.json()["task_reminders"], 0)
 
-        completed_activity = self.telegram_update(17, callback=activity_callbacks[0])
-        completed_mission = self.telegram_update(18, callback=mission_callbacks[0])
+        with patch("telegram_bot._now_for", return_value=activity_view_time):
+            completed_activity = self.telegram_update(17, callback=activity_callbacks[0])
+            completed_mission = self.telegram_update(18, callback=mission_callbacks[0])
         self.assertEqual(completed_activity.status_code, 200)
         self.assertEqual(completed_mission.status_code, 200)
 
